@@ -113,7 +113,7 @@ class _CollabCard extends StatelessWidget {
           children: [
             if (collab.media == CollabMedia.clip)
               _ClipPreview(gradient: CssGradient.fromHue(owner.hue, 20))
-            else
+            else if (collab.media == CollabMedia.audio)
               const _AudioPreview(),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),

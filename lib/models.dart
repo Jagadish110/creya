@@ -46,6 +46,14 @@ extension on String {
   Iterable<String> get characters => runes.map(String.fromCharCode);
 }
 
+/// The signed-in user's own profile, and whether they finished onboarding.
+class MyProfile {
+  const MyProfile({required this.person, required this.onboarded});
+
+  final Person person;
+  final bool onboarded;
+}
+
 enum SwipeDirection { left, right }
 
 enum CollabMedia { audio, clip }
@@ -88,8 +96,8 @@ class Collab {
     required this.title,
     required this.skill,
     required this.desc,
-    required this.media,
     required this.createdAt,
+    this.media,
     this.applied = false,
   });
 
@@ -98,7 +106,9 @@ class Collab {
   final String title;
   final String skill;
   final String desc;
-  final CollabMedia media;
+
+  /// The kind of preview attached to the post, if any.
+  final CollabMedia? media;
   final DateTime createdAt;
   final bool applied;
 

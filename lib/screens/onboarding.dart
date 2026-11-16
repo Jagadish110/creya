@@ -631,18 +631,23 @@ class _ClipContent extends StatelessWidget {
         ),
       ],
       ClipStatus.uploading => <Widget>[
-        Text('Uploading… ${app.uploadPct}%', style: _title),
+        Text(
+          // Not every backend can measure progress; show a number only once
+          // there is one.
+          app.uploadPct > 0 ? 'Uploading… ${app.uploadPct}%' : 'Uploading…',
+          style: _title,
+        ),
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: LinearProgressIndicator(
-            value: app.uploadPct / 100,
+            value: app.uploadPct > 0 ? app.uploadPct / 100 : null,
             minHeight: 6,
             backgroundColor: AppColors.card2,
             color: AppColors.accent,
           ),
         ),
         Text(
-          '${app.clipName} · ${app.clipLengthLabel}',
+          app.clipUploadLabel,
           style: _caption,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -664,7 +669,7 @@ class _ClipContent extends StatelessWidget {
             strokeWidth: 2.5,
           ),
         ),
-        Text('Clip ready · ${app.clipLengthLabel}', style: _title),
+        Text(app.clipReadyLabel, style: _title),
         const Text('Tap to replace', style: _caption),
       ],
     };

@@ -88,6 +88,9 @@ class _FakeProfiles implements ProfileRepository {
   final _Store _store;
 
   @override
+  Future<MyProfile?> loadMine() => _store.call(() => null);
+
+  @override
   Future<void> uploadPhoto(PickedMedia photo) => _store.call(() {});
 
   @override
@@ -279,4 +282,8 @@ class _FakeSafety implements SafetyRepository {
   @override
   Future<void> block(String personId) =>
       _store.call(() => _store.blocked.add(personId));
+
+  @override
+  Future<void> report(String personId, {required String reason}) =>
+      _store.call(() {});
 }

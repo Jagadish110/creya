@@ -17,12 +17,16 @@ abstract interface class AuthRepository {
 }
 
 abstract interface class ProfileRepository {
+  /// The signed-in user's profile, or null when nobody is signed in.
+  Future<MyProfile?> loadMine();
+
   /// Uploads only store the file. The profile starts using it when
   /// [saveProfile] is next called, so an abandoned edit changes nothing.
   Future<void> uploadPhoto(PickedMedia photo);
 
   /// Uploads the talent clip, reporting progress from 0 to 100. The stream
-  /// closes when the upload finishes.
+  /// closes when the upload finishes. A backend that can't measure progress
+  /// reports 0 until it is done.
   Stream<int> uploadClip(PickedMedia clip);
 
   Future<void> saveProfile(Person profile);
@@ -94,6 +98,8 @@ class TypingChanged extends ChatEvent {
 
 abstract interface class SafetyRepository {
   Future<void> block(String personId);
+
+  Future<void> report(String personId, {required String reason});
 }
 
 /// One of each repository, handed to `AppState` as a unit.

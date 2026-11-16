@@ -274,9 +274,7 @@ class ProfileScreen extends StatelessWidget {
                         _TextAction(
                           label: 'Report',
                           color: AppColors.muted,
-                          onTap: () => app.showToast(
-                            'Report sent. Our team reviews every one.',
-                          ),
+                          onTap: app.reportViewed,
                         ),
                         _TextAction(
                           label: 'Block',

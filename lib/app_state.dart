@@ -37,8 +37,13 @@ class AppState extends ChangeNotifier {
        _forcedListState = listState == ListState.data ? null : listState {
     _reset();
     _chatEvents = this.backend.chats.events.listen(_onChatEvent);
-    if (screenKey != null) _applyScreenKey(screenKey);
-    if (stage == AppStage.app) unawaited(_load());
+    if (screenKey != null) {
+      _applyScreenKey(screenKey);
+      if (stage == AppStage.app) unawaited(_load());
+    } else {
+      launching = true;
+      unawaited(_resume());
+    }
   }
 
   final Backend backend;
@@ -55,12 +60,19 @@ class AppState extends ChangeNotifier {
   /// is all caught up before it knows.
   bool get deckLoading => _loadState == ListState.loading;
 
+  /// True at startup while checking for a saved sign-in, so the Welcome
+  /// screen doesn't flash up for someone who is already signed in.
+  bool launching = false;
+
   late AppStage stage;
   late AppTab tab;
   late SubScreen sub;
   Person? _viewed;
   late bool previewing;
 
+  late String myId;
+  late int myHue;
+  late int myConnections;
   late String name;
   late String city;
   late String creative;
@@ -116,6 +128,9 @@ class AppState extends ChangeNotifier {
     sub = SubScreen.none;
     _viewed = null;
     previewing = false;
+    myId = 'me';
+    myHue = 275;
+    myConnections = 24;
     name = 'Jordan Reyes';
     city = 'London';
     creative = 'Music Producer';
@@ -162,6 +177,10 @@ class AppState extends ChangeNotifier {
         stage = AppStage.face;
         hasPhoto = true;
         clip = ClipStatus.done;
+        clipMedia = const PickedMedia(
+          name: 'studio-session.mov',
+          length: MediaLimits.clipLength,
+        );
       case 'discover':
         stage = AppStage.app;
         tab = AppTab.discover;
@@ -259,21 +278,33 @@ class AppState extends ChangeNotifier {
   bool get _forceEmpty => listState == ListState.empty;
 
   Person get me => Person(
-    id: 'me',
+    id: myId,
     name: name.isEmpty ? 'Your name' : name,
     creative: creative,
     city: city.isEmpty ? '—' : city,
     genres: genres,
     bio: bio,
-    hue: 275,
-    connections: 24,
+    hue: myHue,
+    connections: myConnections,
     photo: photoPath,
     clip: clipMedia?.path,
   );
 
-  /// The attached clip's length as `m:ss`.
-  String get clipLengthLabel =>
-      formatClipLength(clipMedia?.length ?? MediaLimits.clipLength);
+  /// `Clip ready`, with the clip's length when it is known.
+  String get clipReadyLabel {
+    final length = clipMedia?.length;
+    return length == null
+        ? 'Clip ready'
+        : 'Clip ready · ${formatClipLength(length)}';
+  }
+
+  /// The clip being uploaded, as `name · m:ss`.
+  String get clipUploadLabel {
+    final length = clipMedia?.length;
+    return length == null
+        ? clipName
+        : '$clipName · ${formatClipLength(length)}';
+  }
 
   String get clipName => clipMedia?.name ?? 'Your clip';
 
@@ -411,10 +442,47 @@ class AppState extends ChangeNotifier {
 
   // ---- Onboarding --------------------------------------------------------
 
+  /// Signs in, then picks up where this person left off: straight into the
+  /// app if they have a finished profile, otherwise the profile form.
   Future<void> signIn() async {
-    if (await _sync(backend.auth.signInWithGoogle)) {
-      goToStage(AppStage.craft);
+    if (!await _sync(backend.auth.signInWithGoogle)) return;
+    await _resume(newcomerStage: AppStage.craft);
+  }
+
+  /// Loads the signed-in user's profile and opens the right screen for it.
+  /// With nobody signed in, opens [newcomerStage].
+  Future<void> _resume({AppStage newcomerStage = AppStage.welcome}) async {
+    MyProfile? mine;
+    try {
+      mine = await backend.profiles.loadMine();
+    } catch (_) {
+      launching = false;
+      showToast("Couldn't reach Creya. Check your connection.");
+      return;
     }
+    launching = false;
+    if (mine == null) return goToStage(newcomerStage);
+
+    final person = mine.person;
+    myId = person.id;
+    myHue = person.hue;
+    myConnections = person.connections;
+    name = person.name;
+    city = person.city;
+    if (person.creative.isNotEmpty) creative = person.creative;
+    genres = person.genres;
+    bio = person.bio;
+    hasPhoto = person.photo != null;
+    photoPath = person.photo;
+    final savedClip = person.clip;
+    if (savedClip != null) {
+      clip = ClipStatus.done;
+      clipMedia = PickedMedia(name: 'Your clip', path: savedClip);
+    }
+
+    if (!mine.onboarded) return goToStage(AppStage.craft);
+    stage = AppStage.app;
+    await _load();
   }
 
   void updateProfile({
@@ -745,6 +813,15 @@ class AppState extends ChangeNotifier {
     _viewed = null;
     showToast('Connection request sent to ${person.firstName}');
     await _sync(() => backend.discover.swipe(person.id, SwipeDirection.right));
+  }
+
+  Future<void> reportViewed() async {
+    final person = _viewed;
+    if (person == null) return;
+    showToast('Report sent. Our team reviews every one.');
+    await _sync(
+      () => backend.safety.report(person.id, reason: 'Reported from profile'),
+    );
   }
 
   Future<void> blockViewed() async {

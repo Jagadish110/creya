@@ -1,6 +1,6 @@
 # Creya backend (Supabase)
 
-The database schema for Creya, as migration files. No Supabase project exists yet; these are ready to apply to a new one.
+The database schema for Creya, as migration files, plus the config for running a local Supabase stack (`supabase start`). No hosted project exists yet; the migrations are ready to apply to a new one.
 
 ## Apply
 
@@ -20,7 +20,12 @@ Or paste each file in `migrations/` into the SQL editor in the Supabase dashboar
 3. `access_rules`: row-level security. Signed-out visitors get nothing; signed-in users see and change only what is theirs, and a block hides both people from each other everywhere.
 4. `storage`: private `avatars`, `clips` and `collab-media` buckets. Each user writes only inside a folder named after their user id.
 
+5. `app_support`: a public connection count on profiles, `mark_chat_read` and `delete_my_account`.
+
+After applying to a hosted project, switch on anonymous sign-ins (Authentication → Sign In / Providers) until Google sign-in is set up; the app uses them as a stand-in.
+
 ## Not covered yet
 
-- Deleting an account needs a server function (it must remove the auth user and their stored files).
-- Clip length can't be checked by the database; only file size and type are limited.
+- Google sign-in.
+- Clip length can't be checked by the database; only file size and type are limited. The app checks length before uploading.
+- Typing indicators and push notifications.

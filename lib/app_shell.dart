@@ -37,12 +37,13 @@ class AppShell extends StatelessWidget {
         body: Stack(
           fit: StackFit.expand,
           children: [
-            switch (app.stage) {
-              AppStage.welcome => const WelcomeScreen(),
-              AppStage.craft => const CraftScreen(),
-              AppStage.face => const FaceScreen(),
-              AppStage.app => const _MainApp(),
-            },
+            if (!app.launching)
+              switch (app.stage) {
+                AppStage.welcome => const WelcomeScreen(),
+                AppStage.craft => const CraftScreen(),
+                AppStage.face => const FaceScreen(),
+                AppStage.app => const _MainApp(),
+              },
             if (app.showDeleteSheet) const DeleteAccountSheet(),
             if (app.toastMessage != null) _Toast(message: app.toastMessage!),
           ],
@@ -114,12 +115,7 @@ class _BottomNav extends StatelessWidget {
     final app = AppScope.of(context);
     final inset = MediaQuery.paddingOf(context).bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        8,
-        _topPadding,
-        8,
-        _bottomPadding(inset),
-      ),
+      padding: EdgeInsets.fromLTRB(8, _topPadding, 8, _bottomPadding(inset)),
       decoration: const BoxDecoration(
         color: AppColors.navBg,
         border: Border(top: BorderSide(color: AppColors.line)),
