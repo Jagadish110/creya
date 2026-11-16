@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-import 'mock_data.dart';
+import 'data/fake_backend.dart';
+import 'data/repositories.dart';
 import 'models.dart';
 
 enum AppStage { welcome, craft, face, app }
@@ -19,24 +20,38 @@ enum CollabMode { browse, mine }
 
 enum RequestMode { connections, collabs }
 
-enum SwipeDirection { left, right }
-
-/// All app state and behaviour, ported from the design's prototype logic.
-/// Everything lives in memory: nothing is sent anywhere or kept between runs.
+/// What the screens show and what the user can do. Navigation, drafts and
+/// toasts live here; the data itself comes from the [Backend] repositories.
+///
+/// Actions update the screen straight away and then tell the backend. If the
+/// backend refuses, the user sees a message and the data is reloaded.
 class AppState extends ChangeNotifier {
-  AppState({this.listState = ListState.data, String? screenKey}) {
+  AppState({Backend? backend, ListState? listState, String? screenKey})
+    : backend = backend ?? fakeBackend(),
+      _forcedListState = listState == ListState.data ? null : listState {
     _reset();
+    _chatEvents = this.backend.chats.events.listen(_onChatEvent);
     if (screenKey != null) _applyScreenKey(screenKey);
+    if (stage == AppStage.app) unawaited(_load());
   }
 
-  /// Which variant list screens show. Only [ListState.data] occurs today; the
-  /// others are the design's states, ready for when real data can fail.
-  ListState listState;
+  final Backend backend;
+
+  /// A development override that pins list screens to one variant.
+  ListState? _forcedListState;
+  ListState _loadState = ListState.loading;
+
+  /// Which variant list screens show.
+  ListState get listState => _forcedListState ?? _loadState;
+
+  /// True until the first load finishes, so Discover doesn't claim the user
+  /// is all caught up before it knows.
+  bool get deckLoading => _loadState == ListState.loading;
 
   late AppStage stage;
   late AppTab tab;
   late SubScreen sub;
-  String? viewId;
+  Person? _viewed;
   late bool previewing;
 
   late String name;
@@ -48,8 +63,7 @@ class AppState extends ChangeNotifier {
   late ClipStatus clip;
   late int uploadPct;
 
-  late List<String> deck;
-  late List<String> skipped;
+  late List<Person> _deck;
 
   late CollabMode collabMode;
   late RequestMode requestMode;
@@ -71,22 +85,21 @@ class AppState extends ChangeNotifier {
   late String postDesc;
   String? editingPostId;
 
-  Timer? _uploadTimer;
+  StreamSubscription<int>? _clipUpload;
+  late final StreamSubscription<ChatEvent> _chatEvents;
   Timer? _toastTimer;
-  final List<Timer> _chatTimers = [];
+  int _tempIds = 0;
+  bool _disposed = false;
 
   void _reset() {
-    _uploadTimer?.cancel();
+    _clipUpload?.cancel();
+    _clipUpload = null;
     _toastTimer?.cancel();
-    for (final timer in _chatTimers) {
-      timer.cancel();
-    }
-    _chatTimers.clear();
 
     stage = AppStage.welcome;
     tab = AppTab.discover;
     sub = SubScreen.none;
-    viewId = null;
+    _viewed = null;
     previewing = false;
     name = 'Jordan Reyes';
     city = 'London';
@@ -97,15 +110,15 @@ class AppState extends ChangeNotifier {
     hasPhoto = false;
     clip = ClipStatus.idle;
     uploadPct = 0;
-    deck = List.of(discoverQueue);
-    skipped = [];
+    _deck = [];
     collabMode = CollabMode.browse;
     requestMode = RequestMode.connections;
-    _browse = List.of(seedBrowse);
-    _mine = List.of(seedMine);
-    _connections = List.of(seedConnections);
-    _collabRequests = List.of(seedCollabRequests);
-    _chats = seedChats();
+    _browse = [];
+    _mine = [];
+    _connections = [];
+    _collabRequests = [];
+    _chats = [];
+    _loadState = ListState.loading;
     chatId = null;
     typing = false;
     blocked = [];
@@ -164,6 +177,62 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  // ---- Talking to the backend --------------------------------------------
+
+  /// Loads everything the main app shows. With [quiet], the current content
+  /// stays on screen while it reloads.
+  Future<void> _load({bool quiet = false}) async {
+    if (!quiet) {
+      _loadState = ListState.loading;
+      notifyListeners();
+    }
+    try {
+      final (deck, browse, mine, connections, collabRequests, chats) = await (
+        backend.discover.loadDeck(),
+        backend.collabs.loadBrowse(),
+        backend.collabs.loadMine(),
+        backend.requests.loadConnectionRequests(),
+        backend.requests.loadCollabRequests(),
+        backend.chats.loadChats(),
+      ).wait;
+      _deck = deck;
+      _browse = browse;
+      _mine = mine;
+      _connections = connections;
+      _collabRequests = collabRequests;
+      _chats = chats;
+      _loadState = ListState.data;
+    } catch (_) {
+      if (!quiet) _loadState = ListState.error;
+    }
+    notifyListeners();
+  }
+
+  /// Runs a backend call for a change already shown on screen. On failure it
+  /// tells the user and reloads, which undoes the change. Returns whether the
+  /// call succeeded.
+  Future<bool> _sync(Future<void> Function() call) async {
+    try {
+      await call();
+      return true;
+    } catch (_) {
+      showToast('Something went wrong. Please try again.');
+      if (stage == AppStage.app) await _load(quiet: true);
+      return false;
+    }
+  }
+
+  /// Retries after a failed load.
+  Future<void> retry() {
+    _forcedListState = null;
+    return _load();
+  }
+
   // ---- Derived values ----------------------------------------------------
 
   bool _visible(String personId) => !blocked.contains(personId);
@@ -181,7 +250,12 @@ class AppState extends ChangeNotifier {
     connections: 24,
   );
 
-  List<String> get visibleDeck => deck.where(_visible).toList();
+  /// The person whose profile is open, if any.
+  Person? get viewed => _viewed;
+
+  String? get viewId => _viewed?.id;
+
+  List<Person> get visibleDeck => _deck.where((p) => _visible(p.id)).toList();
 
   List<ConnectionRequest> get connections =>
       _connections.where((r) => _visible(r.personId)).toList();
@@ -198,25 +272,29 @@ class AppState extends ChangeNotifier {
         : collabRequests;
   }
 
-  List<Collab> get browse =>
-      _forceEmpty ? const [] : _browse.where((c) => _visible(c.ownerId)).toList();
+  List<Collab> get browse => _forceEmpty
+      ? const []
+      : _browse.where((c) => _visible(c.ownerId)).toList();
 
   List<MyPost> get mine => _forceEmpty ? const [] : List.of(_mine);
 
   int get myPostCount => _mine.length;
 
   int applicantsFor(MyPost post) =>
-      _collabRequests.where((r) => r.post == post.title).length;
+      _collabRequests.where((r) => r.postId == post.id).length;
 
-  List<Chat> get chats =>
-      _forceEmpty ? const [] : _chats.where((c) => _visible(c.personId)).toList();
+  List<Chat> get chats => _forceEmpty
+      ? const []
+      : _chats.where((c) => _visible(c.personId)).toList();
 
-  Chat? get activeChat {
+  Chat? _chatById(String? id) {
     for (final chat in _chats) {
-      if (chat.id == chatId) return chat;
+      if (chat.id == id) return chat;
     }
     return null;
   }
+
+  Chat? get activeChat => _chatById(chatId);
 
   bool get canCreateAccount => hasPhoto && clip == ClipStatus.done;
 
@@ -233,14 +311,14 @@ class AppState extends ChangeNotifier {
     tab = next;
     sub = SubScreen.none;
     previewing = false;
-    viewId = null;
+    _viewed = null;
     showDeleteSheet = false;
     notifyListeners();
   }
 
-  void openPerson(String personId) {
+  void openPerson(Person person) {
     sub = SubScreen.person;
-    viewId = personId;
+    _viewed = person;
     notifyListeners();
   }
 
@@ -263,7 +341,7 @@ class AppState extends ChangeNotifier {
         !previewing;
     sub = backToChat ? SubScreen.chat : SubScreen.none;
     previewing = false;
-    viewId = null;
+    _viewed = null;
     notifyListeners();
   }
 
@@ -306,6 +384,12 @@ class AppState extends ChangeNotifier {
 
   // ---- Onboarding --------------------------------------------------------
 
+  Future<void> signIn() async {
+    if (await _sync(backend.auth.signInWithGoogle)) {
+      goToStage(AppStage.craft);
+    }
+  }
+
   void updateProfile({
     String? name,
     String? city,
@@ -331,56 +415,69 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void addPhoto() {
+  Future<void> addPhoto() async {
     hasPhoto = true;
     notifyListeners();
+    if (!await _sync(backend.profiles.uploadPhoto)) {
+      hasPhoto = false;
+      notifyListeners();
+    }
   }
 
-  /// Simulates the clip upload shown in the design.
   void uploadClip() {
     if (clip == ClipStatus.uploading) return;
-    _uploadTimer?.cancel();
     clip = ClipStatus.uploading;
     uploadPct = 0;
     notifyListeners();
-    _uploadTimer = Timer.periodic(const Duration(milliseconds: 110), (timer) {
-      uploadPct = (uploadPct + 7).clamp(0, 100);
-      if (uploadPct >= 100) {
+    _clipUpload = backend.profiles.uploadClip().listen(
+      (pct) {
+        uploadPct = pct.clamp(0, 100);
+        notifyListeners();
+      },
+      onDone: () {
         clip = ClipStatus.done;
-        timer.cancel();
-      }
-      notifyListeners();
-    });
+        uploadPct = 100;
+        notifyListeners();
+      },
+      onError: (Object _) {
+        clip = ClipStatus.idle;
+        uploadPct = 0;
+        showToast('Upload failed. Please try again.');
+      },
+      cancelOnError: true,
+    );
   }
 
-  void finishOnboarding() {
+  Future<void> finishOnboarding() async {
     if (!canCreateAccount) {
       showToast('Add a profile photo and a talent clip to continue');
       return;
     }
+    if (!await _sync(() => backend.profiles.saveProfile(me))) return;
     stage = AppStage.app;
     selectTab(AppTab.discover);
-    showToast('Welcome to Creya, ${name.split(' ').first}');
+    showToast('Welcome to Creya, ${me.firstName}');
+    await _load();
   }
 
   // ---- Discover ----------------------------------------------------------
 
-  void finishSwipe(String personId, SwipeDirection direction) {
-    deck = deck.where((id) => id != personId).toList();
-    if (direction == SwipeDirection.left) {
-      skipped = [...skipped, personId];
-      notifyListeners();
+  Future<void> finishSwipe(Person person, SwipeDirection direction) async {
+    _deck = _deck.where((p) => p.id != person.id).toList();
+    if (direction == SwipeDirection.right) {
+      showToast('Connection request sent to ${person.firstName}');
     } else {
-      showToast('Connection request sent to ${people[personId]!.firstName}');
+      notifyListeners();
     }
+    await _sync(() => backend.discover.swipe(person.id, direction));
   }
 
-  void resetDeck() {
-    final remaining = discoverQueue.where((id) => !skipped.contains(id));
-    deck = remaining.isNotEmpty ? remaining.toList() : List.of(discoverQueue);
-    skipped = [];
+  /// Brings skipped people back round.
+  Future<void> resetDeck() => _sync(() async {
+    await backend.discover.undoSkips();
+    _deck = await backend.discover.loadDeck();
     notifyListeners();
-  }
+  });
 
   // ---- Collabs -----------------------------------------------------------
 
@@ -389,14 +486,13 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void apply(Collab collab) {
+  Future<void> apply(Collab collab) async {
     if (collab.applied) return;
-    _browse = _browse
-        .map((c) => c.id == collab.id ? c.markApplied() : c)
-        .toList();
-    showToast(
-      'Applied. ${people[collab.ownerId]!.firstName} will see your request',
-    );
+    _browse = [
+      for (final c in _browse) c.id == collab.id ? c.markApplied() : c,
+    ];
+    showToast('Applied. ${collab.owner.firstName} will see your request');
+    await _sync(() => backend.collabs.apply(collab.id));
   }
 
   void openNewPost() {
@@ -424,59 +520,50 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void publishPost() {
+  Future<void> publishPost() async {
     if (!canPublish) return;
+    final draft = PostDraft(title: postTitle, skill: postSkill, desc: postDesc);
     final editingId = editingPostId;
-    if (editingId != null) {
-      final previous = _mine.firstWhere((m) => m.id == editingId);
-      _mine = _mine
-          .map(
-            (m) => m.id == editingId
-                ? MyPost(
-                    id: m.id,
-                    title: postTitle,
-                    skill: postSkill,
-                    desc: postDesc,
-                    time: m.time,
-                  )
-                : m,
-          )
-          .toList();
-      // Applicants are linked by title, so a rename must carry them along.
-      _collabRequests = _collabRequests
-          .map(
-            (r) => r.post == previous.title
-                ? ConnectionRequest(
-                    id: r.id,
-                    personId: r.personId,
-                    post: postTitle,
-                  )
-                : r,
-          )
-          .toList();
-    } else {
-      _mine = [
-        MyPost(
-          id: 'm${DateTime.now().millisecondsSinceEpoch}',
-          title: postTitle,
-          skill: postSkill,
-          desc: postDesc,
-          time: 'now',
-        ),
-        ..._mine,
-      ];
-    }
     sub = SubScreen.none;
     collabMode = CollabMode.mine;
-    showToast(editingId != null ? 'Post updated' : 'Collab published');
+
+    if (editingId != null) {
+      _mine = [
+        for (final m in _mine) m.id == editingId ? m.withDraft(draft) : m,
+      ];
+      _collabRequests = [
+        for (final r in _collabRequests)
+          r.postId == editingId ? r.withPostTitle(draft.title) : r,
+      ];
+      showToast('Post updated');
+      await _sync(() => backend.collabs.updatePost(editingId, draft));
+      return;
+    }
+
+    // Shown at once under a placeholder id, then swapped for the saved post.
+    final placeholder = MyPost(
+      id: 'pending-${_tempIds++}',
+      title: draft.title,
+      skill: draft.skill,
+      desc: draft.desc,
+      createdAt: DateTime.now(),
+    );
+    _mine = [placeholder, ..._mine];
+    showToast('Collab published');
+    await _sync(() async {
+      final saved = await backend.collabs.createPost(draft);
+      _mine = [for (final m in _mine) m.id == placeholder.id ? saved : m];
+      notifyListeners();
+    });
   }
 
-  void deletePost(MyPost post) {
+  Future<void> deletePost(MyPost post) async {
     _mine = _mine.where((m) => m.id != post.id).toList();
     _collabRequests = _collabRequests
-        .where((r) => r.post != post.title)
+        .where((r) => r.postId != post.id)
         .toList();
     showToast('Post deleted');
+    await _sync(() => backend.collabs.deletePost(post.id));
   }
 
   void viewApplicants() {
@@ -497,83 +584,92 @@ class AppState extends ChangeNotifier {
     _collabRequests = _collabRequests.where((r) => r.id != request.id).toList();
   }
 
-  void acceptRequest(ConnectionRequest request) {
+  Future<void> acceptRequest(ConnectionRequest request) async {
     _removeRequest(request);
-    final exists = _chats.any((c) => c.personId == request.personId);
-    if (!exists) {
-      _chats = [
-        Chat(
-          id: 'h${DateTime.now().millisecondsSinceEpoch}',
-          personId: request.personId,
-          time: 'now',
-          unread: false,
-          messages: [],
-        ),
-        ..._chats,
-      ];
-    }
-    showToast(
-      'Accepted. Chat opened with ${people[request.personId]!.firstName}',
-    );
+    showToast('Accepted. Chat opened with ${request.person.firstName}');
+    await _sync(() async {
+      final chat = await backend.requests.respond(request, accept: true);
+      if (chat != null && _chatById(chat.id) == null) {
+        _chats = [chat, ..._chats];
+        notifyListeners();
+      }
+    });
   }
 
-  void declineRequest(ConnectionRequest request) {
+  Future<void> declineRequest(ConnectionRequest request) async {
     _removeRequest(request);
     showToast('Request declined');
+    await _sync(() => backend.requests.respond(request, accept: false));
   }
 
   // ---- Messages ----------------------------------------------------------
 
-  void openChat(Chat chat) {
+  Future<void> openChat(Chat chat) async {
     chat.unread = false;
     sub = SubScreen.chat;
     chatId = chat.id;
+    typing = false;
     notifyListeners();
+    await _sync(() => backend.chats.markRead(chat.id));
   }
 
-  /// Sends a message, followed by the design's simulated reply.
-  void sendMessage(String text) {
+  Future<void> sendMessage(String text) async {
     final body = text.trim();
     final chat = activeChat;
     if (body.isEmpty || chat == null) return;
-    chat.time = 'now';
+    chat.lastActivity = DateTime.now();
     chat.messages.add(Message(me: true, body: body));
     notifyListeners();
-    _chatTimers.add(
-      Timer(const Duration(milliseconds: 500), () {
-        typing = true;
-        notifyListeners();
-      }),
-    );
-    _chatTimers.add(
-      Timer(const Duration(milliseconds: 1800), () {
-        typing = false;
-        chat.messages.add(
-          const Message(me: false, body: 'Sounds good, let’s do it.'),
-        );
-        notifyListeners();
-      }),
-    );
+    await _sync(() => backend.chats.send(chat.id, body));
+  }
+
+  void _onChatEvent(ChatEvent event) {
+    final chat = _chatById(event.chatId);
+    if (chat == null) {
+      // A chat this session has not loaded yet.
+      if (stage == AppStage.app) unawaited(_load(quiet: true));
+      return;
+    }
+    final open = sub == SubScreen.chat && chatId == chat.id;
+    switch (event) {
+      case TypingChanged(:final typing):
+        if (!open) return;
+        this.typing = typing;
+      case MessageReceived(:final message):
+        chat.messages.add(message);
+        chat.lastActivity = DateTime.now();
+        if (open) {
+          unawaited(backend.chats.markRead(chat.id).catchError((_) {}));
+        } else {
+          chat.unread = true;
+        }
+    }
+    notifyListeners();
   }
 
   // ---- Profile and safety ------------------------------------------------
 
-  void connectWithViewed() {
-    final id = viewId;
-    if (id == null) return;
-    deck = deck.where((x) => x != id).toList();
+  Future<void> connectWithViewed() async {
+    final person = _viewed;
+    if (person == null) return;
+    _deck = _deck.where((p) => p.id != person.id).toList();
     sub = SubScreen.none;
-    viewId = null;
-    showToast('Connection request sent to ${people[id]!.firstName}');
+    _viewed = null;
+    showToast('Connection request sent to ${person.firstName}');
+    await _sync(() => backend.discover.swipe(person.id, SwipeDirection.right));
   }
 
-  void blockViewed() {
-    final id = viewId;
-    if (id == null) return;
-    blocked = [...blocked, id];
+  Future<void> blockViewed() async {
+    final person = _viewed;
+    if (person == null) return;
+    blocked = [...blocked, person.id];
     sub = SubScreen.none;
-    viewId = null;
-    showToast("${people[id]!.firstName} blocked. They won't appear anywhere.");
+    _viewed = null;
+    showToast("${person.firstName} blocked. They won't appear anywhere.");
+    if (!await _sync(() => backend.safety.block(person.id))) {
+      blocked = blocked.where((id) => id != person.id).toList();
+      notifyListeners();
+    }
   }
 
   // ---- Settings ----------------------------------------------------------
@@ -593,35 +689,37 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sign out and delete both return to a fresh Welcome screen, as designed.
-  void signOut() {
-    _reset();
-    notifyListeners();
-  }
+  /// Returns to a fresh Welcome screen, as designed.
+  Future<void> signOut() => _leave(backend.auth.signOut);
 
-  void retry() {
-    listState = ListState.data;
+  Future<void> deleteAccount() => _leave(backend.auth.deleteAccount);
+
+  Future<void> _leave(Future<void> Function() call) async {
+    try {
+      await call();
+    } catch (_) {
+      showDeleteSheet = false;
+      showToast('Something went wrong. Please try again.');
+      return;
+    }
+    _reset();
     notifyListeners();
   }
 
   @override
   void dispose() {
-    _uploadTimer?.cancel();
+    _disposed = true;
+    _clipUpload?.cancel();
+    _chatEvents.cancel();
     _toastTimer?.cancel();
-    for (final timer in _chatTimers) {
-      timer.cancel();
-    }
     super.dispose();
   }
 }
 
 /// Makes the [AppState] available to the widget tree and rebuilds on change.
 class AppScope extends InheritedNotifier<AppState> {
-  const AppScope({
-    super.key,
-    required AppState state,
-    required super.child,
-  }) : super(notifier: state);
+  const AppScope({super.key, required AppState state, required super.child})
+    : super(notifier: state);
 
   static AppState of(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;

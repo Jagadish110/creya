@@ -1,0 +1,115 @@
+import '../models.dart';
+
+/// The app's data layer. `AppState` talks only to these interfaces, so the
+/// in-memory backend used today can be swapped for a real one without
+/// touching the screens.
+///
+/// Every call may fail by throwing; `AppState` reports the failure and
+/// reloads to get back in step with the backend.
+
+abstract interface class AuthRepository {
+  Future<void> signInWithGoogle();
+
+  Future<void> signOut();
+
+  Future<void> deleteAccount();
+}
+
+abstract interface class ProfileRepository {
+  Future<void> uploadPhoto();
+
+  /// Uploads the talent clip, reporting progress from 0 to 100. The stream
+  /// closes when the upload finishes.
+  Stream<int> uploadClip();
+
+  Future<void> saveProfile(Person profile);
+}
+
+abstract interface class DiscoverRepository {
+  /// People the user has not swiped, is not connected to and has not blocked.
+  Future<List<Person>> loadDeck();
+
+  /// A right swipe sends a connection request.
+  Future<void> swipe(String personId, SwipeDirection direction);
+
+  /// Forgets the user's left swipes so those people can come round again.
+  Future<void> undoSkips();
+}
+
+abstract interface class CollabRepository {
+  Future<List<Collab>> loadBrowse();
+
+  Future<List<MyPost>> loadMine();
+
+  Future<void> apply(String collabId);
+
+  Future<MyPost> createPost(PostDraft draft);
+
+  Future<MyPost> updatePost(String postId, PostDraft draft);
+
+  Future<void> deletePost(String postId);
+}
+
+abstract interface class RequestRepository {
+  Future<List<ConnectionRequest>> loadConnectionRequests();
+
+  /// Applications to the user's own collab posts.
+  Future<List<ConnectionRequest>> loadCollabRequests();
+
+  /// Answers a request. Returns the chat it opens when accepted, else null.
+  Future<Chat?> respond(ConnectionRequest request, {required bool accept});
+}
+
+abstract interface class ChatRepository {
+  Future<List<Chat>> loadChats();
+
+  /// Live updates from the other person in any chat.
+  Stream<ChatEvent> get events;
+
+  Future<void> send(String chatId, String body);
+
+  Future<void> markRead(String chatId);
+}
+
+sealed class ChatEvent {
+  const ChatEvent(this.chatId);
+
+  final String chatId;
+}
+
+class MessageReceived extends ChatEvent {
+  const MessageReceived(super.chatId, this.message);
+
+  final Message message;
+}
+
+class TypingChanged extends ChatEvent {
+  const TypingChanged(super.chatId, {required this.typing});
+
+  final bool typing;
+}
+
+abstract interface class SafetyRepository {
+  Future<void> block(String personId);
+}
+
+/// One of each repository, handed to `AppState` as a unit.
+class Backend {
+  const Backend({
+    required this.auth,
+    required this.profiles,
+    required this.discover,
+    required this.collabs,
+    required this.requests,
+    required this.chats,
+    required this.safety,
+  });
+
+  final AuthRepository auth;
+  final ProfileRepository profiles;
+  final DiscoverRepository discover;
+  final CollabRepository collabs;
+  final RequestRepository requests;
+  final ChatRepository chats;
+  final SafetyRepository safety;
+}

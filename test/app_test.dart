@@ -1,7 +1,10 @@
 import 'dart:io';
 
 import 'package:creya/app_state.dart';
+import 'package:creya/data/fake_backend.dart';
+import 'package:creya/data/repositories.dart';
 import 'package:creya/main.dart';
+import 'package:creya/models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,11 +16,16 @@ Future<AppState> _pump(
   WidgetTester tester, {
   String? screen,
   ListState listState = ListState.data,
+  Backend? backend,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  final state = AppState(screenKey: screen, listState: listState);
+  final state = AppState(
+    backend: backend,
+    screenKey: screen,
+    listState: listState,
+  );
   await tester.pumpWidget(CreyaApp(state: state));
   await tester.pump();
   return state;
@@ -41,6 +49,23 @@ Future<void> _loadFonts() async {
     }
     await loader.load();
   }
+}
+
+/// Refuses every swipe, to check that a failed action is undone.
+class _OfflineDiscover implements DiscoverRepository {
+  _OfflineDiscover(this._inner);
+
+  final DiscoverRepository _inner;
+
+  @override
+  Future<List<Person>> loadDeck() => _inner.loadDeck();
+
+  @override
+  Future<void> swipe(String personId, SwipeDirection direction) =>
+      Future.error(StateError('offline'));
+
+  @override
+  Future<void> undoSkips() => _inner.undoSkips();
 }
 
 void main() {
@@ -115,7 +140,7 @@ void main() {
 
     await tester.drag(find.text('Amara Okafor'), const Offset(200, 0));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(state.visibleDeck.first, 'lucia');
+    expect(state.visibleDeck.first.id, 'lucia');
     expect(find.text('Connection request sent to Amara'), findsOneWidget);
     await tester.pump(_settle);
   });
@@ -125,7 +150,7 @@ void main() {
 
     await tester.drag(find.text('Amara Okafor'), const Offset(60, 0));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(state.visibleDeck.first, 'amara');
+    expect(state.visibleDeck.first.id, 'amara');
   });
 
   testWidgets('skip button empties the deck to the caught-up state', (
@@ -243,5 +268,79 @@ void main() {
     await tester.pump();
     expect(state.showDeleteSheet, isFalse);
     expect(state.stage, AppStage.app);
+  });
+
+  testWidgets('posts with the same title keep separate applicants', (
+    tester,
+  ) async {
+    final state = await _pump(tester, screen: 'collabs');
+    final original = state.mine.first;
+
+    state.openNewPost();
+    state.updatePostDraft(title: original.title);
+    await state.publishPost();
+    await tester.pump();
+    expect(state.mine, hasLength(3));
+    expect(state.applicantsFor(state.mine.first), 0);
+    expect(state.applicantsFor(original), 1);
+
+    await state.deletePost(state.mine.first);
+    await tester.pump();
+    expect(state.applicantsFor(original), 1);
+    expect(state.requestBadge, 4);
+    await tester.pump(_settle);
+  });
+
+  testWidgets('a skipped person comes back on refresh, a connected one '
+      'does not', (tester) async {
+    final state = await _pump(tester, screen: 'discover');
+    final deck = state.visibleDeck;
+
+    await state.finishSwipe(deck[0], SwipeDirection.right);
+    await state.finishSwipe(deck[1], SwipeDirection.left);
+    await state.resetDeck();
+    await tester.pump();
+    final ids = state.visibleDeck.map((p) => p.id);
+    expect(ids, isNot(contains(deck[0].id)));
+    expect(ids, contains(deck[1].id));
+    await tester.pump(_settle);
+  });
+
+  testWidgets('a failed load shows the error state', (tester) async {
+    final state = await _pump(
+      tester,
+      screen: 'collabs',
+      backend: fakeBackend(failing: true),
+    );
+    expect(state.listState, ListState.error);
+    expect(find.text('Producer for my debut EP'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a refused action is undone and reported', (tester) async {
+    final real = fakeBackend();
+    final state = await _pump(
+      tester,
+      screen: 'discover',
+      backend: Backend(
+        auth: real.auth,
+        profiles: real.profiles,
+        discover: _OfflineDiscover(real.discover),
+        collabs: real.collabs,
+        requests: real.requests,
+        chats: real.chats,
+        safety: real.safety,
+      ),
+    );
+
+    await tester.tap(find.bySemanticsLabel('Skip'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    expect(state.visibleDeck.first.id, 'amara');
+    expect(
+      find.text('Something went wrong. Please try again.'),
+      findsOneWidget,
+    );
+    await tester.pump(_settle);
   });
 }

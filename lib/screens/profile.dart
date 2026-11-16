@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../icons.dart';
-import '../mock_data.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -18,7 +17,7 @@ class ProfileScreen extends StatelessWidget {
     final isPreview = isPerson && app.previewing;
     final isOther = isPerson && !app.previewing;
     final isMe = !isPerson;
-    final Person person = isOther ? people[app.viewId]! : app.me;
+    final Person person = isOther ? app.viewed! : app.me;
     final top = MediaQuery.paddingOf(context).top;
 
     return ColoredBox(
@@ -671,7 +670,7 @@ class DeleteAccountSheet extends StatelessWidget {
                 const SizedBox(height: 0),
                 PillButton(
                   label: 'Delete account',
-                  onTap: app.signOut,
+                  onTap: app.deleteAccount,
                   height: 52,
                   background: AppColors.declined,
                   pressedBackground: AppColors.declined,

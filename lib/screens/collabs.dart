@@ -103,7 +103,7 @@ class _CollabCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final owner = people[collab.ownerId]!;
+    final owner = collab.owner;
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: ColoredBox(

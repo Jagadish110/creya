@@ -8,7 +8,7 @@ Welcome, Your craft, Your face (onboarding) · Discover (swipe deck) · Collabs 
 
 ## Status
 
-This is the front end only. All data is sample data held in memory (`lib/mock_data.dart`), and Google sign-in, photo and clip uploads, and chat replies are simulated. Nothing is saved between launches.
+The app runs on an in-memory backend (`lib/data/fake_backend.dart`) seeded with sample data: Google sign-in, photo and clip uploads, and chat replies are simulated, and nothing is saved between launches. The screens only talk to the repository interfaces in `lib/data/repositories.dart`, so a real backend can replace the fake one without changing them. The database schema for that backend is in `supabase/`.
 
 ## Run it
 
@@ -38,8 +38,11 @@ flutter test
 ## Layout
 
 - `lib/theme.dart`: colour tokens, fonts, gradients
-- `lib/app_state.dart`: all app state and behaviour
+- `lib/app_state.dart`: navigation, drafts and what each screen shows
+- `lib/data/repositories.dart`: the data layer's interfaces, one per area
+- `lib/data/fake_backend.dart`: the in-memory implementation used today
 - `lib/models.dart`, `lib/mock_data.dart`: data types and sample content
+- `supabase/`: database schema for the real backend (not yet connected)
 - `lib/widgets.dart`, `lib/icons.dart`: shared UI pieces and icons
 - `lib/screens/`: one file per area
 - `assets/fonts/`: DM Sans, DM Mono and Cormorant Garamond (SIL Open Font License)

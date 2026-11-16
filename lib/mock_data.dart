@@ -1,7 +1,8 @@
 import 'models.dart';
 
-/// Sample content from the design. There is no backend yet, so this is what
-/// the app shows; replace it with real API data when one exists.
+/// Sample content from the design. It feeds the in-memory backend in
+/// `data/fake_backend.dart`; the app itself never reads it directly, apart
+/// from the [creatives] list of crafts.
 const creatives = [
   '3D Artist',
   'Bassist',
@@ -115,78 +116,82 @@ const people = <String, Person>{
 
 const discoverQueue = ['amara', 'lucia', 'theo', 'sol', 'rafa'];
 
-const seedBrowse = [
+DateTime _ago(Duration age) => DateTime.now().subtract(age);
+
+List<Collab> seedBrowse() => [
   Collab(
     id: 'c1',
-    ownerId: 'theo',
+    owner: people['theo']!,
     title: 'Producer for my debut EP',
     skill: 'Music Producer',
     desc:
         'Four tracks, dark and melodic. I have demos and lyrics ready, need someone to shape the sound and co-produce through to mix.',
     media: CollabMedia.audio,
-    time: '2h',
+    createdAt: _ago(const Duration(hours: 2)),
   ),
   Collab(
     id: 'c2',
-    ownerId: 'lucia',
+    owner: people['lucia']!,
     title: 'Dancers for a 16mm music video',
     skill: 'Dancer',
     desc:
         'One-day shoot in Bristol next month. Looking for two dancers comfortable with improvised movement on location.',
     media: CollabMedia.clip,
-    time: '5h',
+    createdAt: _ago(const Duration(hours: 5)),
   ),
   Collab(
     id: 'c3',
-    ownerId: 'kenji',
+    owner: people['kenji']!,
     title: 'Vocalist for a lo-fi tape',
     skill: 'Vocalist',
     desc:
         'Six-track tape, soft hooks over dusty beats. Remote is fine, credit and split on every track.',
     media: CollabMedia.audio,
-    time: '1d',
+    createdAt: _ago(const Duration(days: 1)),
   ),
   Collab(
     id: 'c4',
-    ownerId: 'ines',
+    owner: people['ines']!,
     title: 'Musicians for a portrait series',
     skill: 'Guitarist',
     desc:
         'Shooting a series on players and their instruments. Free prints and full usage for your releases.',
     media: CollabMedia.clip,
-    time: '2d',
+    createdAt: _ago(const Duration(days: 2)),
   ),
 ];
 
-const seedMine = [
+List<MyPost> seedMine() => [
   MyPost(
     id: 'm1',
     title: 'Vocalist for a summer house single',
     skill: 'Vocalist',
-    time: '3d',
+    createdAt: _ago(const Duration(days: 3)),
   ),
   MyPost(
     id: 'm2',
     title: 'Dancer for a music video teaser',
     skill: 'Dancer',
-    time: '1w',
+    createdAt: _ago(const Duration(days: 7)),
   ),
 ];
 
-const seedConnections = [
-  ConnectionRequest(id: 'r1', personId: 'kenji'),
-  ConnectionRequest(id: 'r2', personId: 'ines'),
+List<ConnectionRequest> seedConnections() => [
+  ConnectionRequest(id: 'r1', person: people['kenji']!),
+  ConnectionRequest(id: 'r2', person: people['ines']!),
 ];
 
-const seedCollabRequests = [
+List<ConnectionRequest> seedCollabRequests() => [
   ConnectionRequest(
     id: 'r3',
-    personId: 'amara',
+    person: people['amara']!,
+    postId: 'm1',
     post: 'Vocalist for a summer house single',
   ),
   ConnectionRequest(
     id: 'r4',
-    personId: 'sol',
+    person: people['sol']!,
+    postId: 'm2',
     post: 'Dancer for a music video teaser',
   ),
 ];
@@ -194,8 +199,8 @@ const seedCollabRequests = [
 List<Chat> seedChats() => [
   Chat(
     id: 'h1',
-    personId: 'maya',
-    time: '10:24',
+    person: people['maya']!,
+    lastActivity: _ago(const Duration(minutes: 40)),
     unread: true,
     messages: const [
       Message(me: false, body: 'Hey! Loved the clip.'),
@@ -205,8 +210,8 @@ List<Chat> seedChats() => [
   ),
   Chat(
     id: 'h2',
-    personId: 'rafa',
-    time: 'Mon',
+    person: people['rafa']!,
+    lastActivity: _ago(const Duration(days: 2)),
     unread: false,
     messages: const [
       Message(me: true, body: 'Can you lay down a guitar part this week?'),

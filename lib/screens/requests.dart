@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
-import '../mock_data.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -79,7 +78,7 @@ class _RequestCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final person = people[request.personId]!;
+    final person = request.person;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -121,7 +120,7 @@ class _RequestCard extends StatelessWidget {
                 ),
               ),
               Pressable(
-                onTap: () => app.openPerson(person.id),
+                onTap: () => app.openPerson(person),
                 label: 'View profile',
                 builder: (context, _) => const SizedBox(
                   height: 44,

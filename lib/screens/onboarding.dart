@@ -79,7 +79,7 @@ class WelcomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 40),
             Pressable(
-              onTap: () => app.goToStage(AppStage.craft),
+              onTap: app.signIn,
               label: 'Continue with Google',
               builder: (context, pressed) => Container(
                 height: 56,

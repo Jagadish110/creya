@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../icons.dart';
-import '../mock_data.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -148,7 +147,7 @@ class _ChatRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final person = people[chat.personId]!;
+    final person = chat.person;
     return Pressable(
       onTap: () => app.openChat(chat),
       label: 'Chat with ${person.name}',
@@ -262,7 +261,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final app = AppScope.of(context);
     final chat = app.activeChat;
     if (chat == null) return const SizedBox.shrink();
-    final person = people[chat.personId]!;
+    final person = chat.person;
 
     // Keep the newest message in view, as the design does after every update.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -290,7 +289,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   Expanded(
                     child: Pressable(
-                      onTap: () => app.openPerson(person.id),
+                      onTap: () => app.openPerson(person),
                       label: 'View ${person.name}',
                       builder: (context, _) => Row(
                         spacing: 10,

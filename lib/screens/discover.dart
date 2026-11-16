@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../icons.dart';
-import '../mock_data.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -32,13 +31,13 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
   void _swipe(AppState app, SwipeDirection direction) {
     final deck = app.visibleDeck;
     if (deck.isEmpty || _leaving != null) return;
-    final id = deck.first;
+    final person = deck.first;
     setState(() {
       _leaving = direction;
       _dragging = false;
     });
     Timer(_swipeDuration, () {
-      app.finishSwipe(id, direction);
+      app.finishSwipe(person, direction);
       if (!mounted) return;
       setState(() {
         _dx = 0;
@@ -59,15 +58,15 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       _dx = 0;
       _dy = 0;
     });
-    if (openProfile) app.openPerson(top.id);
+    if (openProfile) app.openPerson(top);
   }
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final deck = app.visibleDeck;
-    final top = deck.isNotEmpty ? people[deck[0]] : null;
-    final next = deck.length > 1 ? people[deck[1]] : null;
+    final top = deck.isNotEmpty ? deck[0] : null;
+    final next = deck.length > 1 ? deck[1] : null;
 
     return Column(
       children: [
@@ -112,7 +111,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                       ),
                     if (top != null)
                       _buildTopCard(app, top, constraints.maxWidth)
-                    else
+                    else if (!app.deckLoading)
                       _CaughtUp(onRefresh: app.resetDeck),
                   ],
                 );
@@ -140,7 +139,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               CircleIconButton(
                 icon: AppIcons.user,
                 label: 'View profile',
-                onTap: top == null ? null : () => app.openPerson(top.id),
+                onTap: top == null ? null : () => app.openPerson(top),
                 size: 48,
                 border: const BorderSide(color: AppColors.line),
                 pressedScale: 0.92,
@@ -460,11 +459,7 @@ class _CaughtUp extends StatelessWidget {
           const Text(
             'New creatives join every day. Post a collab so the right people find you.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.muted,
-              fontSize: 15,
-              height: 1.5,
-            ),
+            style: TextStyle(color: AppColors.muted, fontSize: 15, height: 1.5),
           ),
           Padding(
             padding: const EdgeInsets.only(top: 8),
