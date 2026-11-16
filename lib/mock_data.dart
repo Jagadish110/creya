@@ -202,10 +202,22 @@ List<Chat> seedChats() => [
     person: people['maya']!,
     lastActivity: _ago(const Duration(minutes: 40)),
     unread: true,
-    messages: const [
-      Message(me: false, body: 'Hey! Loved the clip.'),
-      Message(me: true, body: 'Thank you! Your cover work is great.'),
-      Message(me: false, body: 'Want me to mock up a cover for the single?'),
+    messages: [
+      Message(
+        me: false,
+        body: 'Hey! Loved the clip.',
+        sentAt: _ago(const Duration(minutes: 55)),
+      ),
+      Message(
+        me: true,
+        body: 'Thank you! Your cover work is great.',
+        sentAt: _ago(const Duration(minutes: 48)),
+      ),
+      Message(
+        me: false,
+        body: 'Want me to mock up a cover for the single?',
+        sentAt: _ago(const Duration(minutes: 40)),
+      ),
     ],
   ),
   Chat(
@@ -213,9 +225,17 @@ List<Chat> seedChats() => [
     person: people['rafa']!,
     lastActivity: _ago(const Duration(days: 2)),
     unread: false,
-    messages: const [
-      Message(me: true, body: 'Can you lay down a guitar part this week?'),
-      Message(me: false, body: 'Send the stems over, will do it Thursday.'),
+    messages: [
+      Message(
+        me: true,
+        body: 'Can you lay down a guitar part this week?',
+        sentAt: _ago(const Duration(days: 2, hours: 1)),
+      ),
+      Message(
+        me: false,
+        body: 'Send the stems over, will do it Thursday.',
+        sentAt: _ago(const Duration(days: 2)),
+      ),
     ],
   ),
 ];

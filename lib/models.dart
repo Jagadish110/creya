@@ -189,10 +189,29 @@ class ConnectionRequest {
 }
 
 class Message {
-  const Message({required this.me, required this.body});
+  const Message({
+    required this.me,
+    required this.body,
+    required this.sentAt,
+    this.id,
+  });
 
   final bool me;
   final String body;
+  final DateTime sentAt;
+
+  /// The backend's id. Null for a message shown before it has been saved.
+  final String? id;
+}
+
+/// One screenful of a chat's history, oldest first.
+class MessagePage {
+  const MessagePage({required this.messages, required this.hasOlder});
+
+  final List<Message> messages;
+
+  /// Whether earlier messages exist beyond this page.
+  final bool hasOlder;
 }
 
 class Chat {
@@ -202,6 +221,8 @@ class Chat {
     required this.lastActivity,
     required this.unread,
     required List<Message> messages,
+    this.historyLoaded = false,
+    this.hasOlder = false,
   }) : messages = List.of(messages);
 
   final String id;
@@ -209,8 +230,14 @@ class Chat {
   DateTime lastActivity;
   bool unread;
 
-  /// Always a growable copy, so callers can pass const lists.
+  /// The chat list only carries each chat's latest message. Once the chat
+  /// has been opened, [historyLoaded] is true and this holds the pages
+  /// loaded so far, oldest first.
   final List<Message> messages;
+  bool historyLoaded;
+
+  /// Whether messages earlier than the loaded ones exist.
+  bool hasOlder;
 
   String get personId => person.id;
 
@@ -222,5 +249,16 @@ class Chat {
     lastActivity: lastActivity,
     unread: unread,
     messages: messages,
+    historyLoaded: historyLoaded,
+    hasOlder: hasOlder,
+  );
+
+  /// This chat as the chat list sees it: just the latest message.
+  Chat preview() => Chat(
+    id: id,
+    person: person,
+    lastActivity: lastActivity,
+    unread: unread,
+    messages: [?messages.lastOrNull],
   );
 }

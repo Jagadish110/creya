@@ -485,10 +485,7 @@ class _SupabaseChats implements ChatRepository {
             final row = change.newRecord;
             if (row['sender_id'] == _core.client.auth.currentUser?.id) return;
             _events.add(
-              MessageReceived(
-                row['chat_id'] as String,
-                Message(me: false, body: row['body'] as String),
-              ),
+              MessageReceived(row['chat_id'] as String, _message(row, null)),
             );
           },
         )
@@ -501,6 +498,13 @@ class _SupabaseChats implements ChatRepository {
     if (channel != null) await _core.client.removeChannel(channel);
   }
 
+  Message _message(_Row row, String? userId) => Message(
+    id: row['id'] as String,
+    me: row['sender_id'] == userId,
+    body: row['body'] as String,
+    sentAt: _time(row['created_at']),
+  );
+
   @override
   Future<List<Chat>> loadChats() async {
     final userId = _core.userId;
@@ -509,23 +513,16 @@ class _SupabaseChats implements ChatRepository {
         .select()
         .order('last_message_at', ascending: false);
     if (chats.isEmpty) return [];
-    final chatIds = [for (final c in chats) c['id'] as String];
 
     String other(_Row chat) =>
         (chat['user_a'] == userId ? chat['user_b'] : chat['user_a']) as String;
 
-    final (people, messages, reads) = await (
+    final (people, reads) = await (
       _core.peopleById(chats.map(other)),
-      _core.client
-          .from('messages')
-          .select()
-          .inFilter('chat_id', chatIds)
-          .order('created_at'),
-      _core.client
-          .from('chat_reads')
-          .select()
-          .eq('user_id', userId)
-          .inFilter('chat_id', chatIds),
+      _core.client.from('chat_reads').select().eq('user_id', userId).inFilter(
+        'chat_id',
+        [for (final c in chats) c['id'] as String],
+      ),
     ).wait;
     final readAt = {
       for (final r in reads) r['chat_id']: _time(r['last_read_at']),
@@ -535,27 +532,48 @@ class _SupabaseChats implements ChatRepository {
       for (final chat in chats)
         if (people[other(chat)] case final person?)
           () {
-            final own = messages.where((m) => m['chat_id'] == chat['id']);
-            final last = own.lastOrNull;
+            final lastAt = _time(chat['last_message_at']);
+            final body = chat['last_message_body'] as String?;
+            final mine = chat['last_message_sender_id'] == userId;
             final read = readAt[chat['id']];
             return Chat(
               id: chat['id'] as String,
               person: person,
-              lastActivity: _time(chat['last_message_at']),
+              lastActivity: lastAt,
               unread:
-                  last != null &&
-                  last['sender_id'] != userId &&
-                  (read == null || _time(last['created_at']).isAfter(read)),
+                  body != null &&
+                  !mine &&
+                  (read == null || lastAt.isAfter(read)),
               messages: [
-                for (final m in own)
-                  Message(
-                    me: m['sender_id'] == userId,
-                    body: m['body'] as String,
-                  ),
+                if (body != null) Message(me: mine, body: body, sentAt: lastAt),
               ],
             );
           }(),
     ];
+  }
+
+  @override
+  Future<MessagePage> loadMessages(
+    String chatId, {
+    DateTime? before,
+    int limit = 30,
+  }) async {
+    final userId = _core.userId;
+    var query = _core.client.from('messages').select().eq('chat_id', chatId);
+    if (before != null) {
+      query = query.lt('created_at', before.toUtc().toIso8601String());
+    }
+    // One extra row tells us whether anything older remains.
+    final rows = await query
+        .order('created_at', ascending: false)
+        .limit(limit + 1);
+    return MessagePage(
+      messages: [
+        for (final row in rows.take(limit).toList().reversed)
+          _message(row, userId),
+      ],
+      hasOlder: rows.length > limit,
+    );
   }
 
   @override

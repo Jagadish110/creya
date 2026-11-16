@@ -68,7 +68,16 @@ abstract interface class RequestRepository {
 }
 
 abstract interface class ChatRepository {
+  /// The chat list. Each chat carries only its latest message.
   Future<List<Chat>> loadChats();
+
+  /// A page of a chat's history, ending just before [before], or at the
+  /// newest message when [before] is null.
+  Future<MessagePage> loadMessages(
+    String chatId, {
+    DateTime? before,
+    int limit = 30,
+  });
 
   /// Live updates from the other person in any chat.
   Stream<ChatEvent> get events;

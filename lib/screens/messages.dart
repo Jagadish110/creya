@@ -252,6 +252,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _send(AppState app) {
     app.sendMessage(_draft.text);
+    // Offset 0 is the newest message, since the list is reversed.
+    if (_scroll.hasClients) _scroll.jumpTo(0);
     _draft.clear();
     _focus.requestFocus();
   }
@@ -262,11 +264,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final chat = app.activeChat;
     if (chat == null) return const SizedBox.shrink();
     final person = chat.person;
-
-    // Keep the newest message in view, as the design does after every update.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
-    });
 
     return ColoredBox(
       color: AppColors.bg,
@@ -329,36 +326,68 @@ class _ChatScreenState extends State<ChatScreen> {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final maxBubble = (constraints.maxWidth - 32) * 0.78;
-                  return SingleChildScrollView(
-                    controller: _scroll,
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      spacing: 6,
-                      children: [
-                        Center(
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.card,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: const Text(
-                              'You connected · say hello',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.muted,
-                              ),
-                            ),
-                          ),
+                  // Reversed, so the newest message stays in view as messages
+                  // arrive and earlier pages can be added above without the
+                  // view jumping. The minimum height keeps a short chat at
+                  // the top of the screen.
+                  return NotificationListener<ScrollNotification>(
+                    onNotification: (scroll) {
+                      if (scroll.metrics.extentAfter < 200) {
+                        app.loadOlderMessages();
+                      }
+                      return false;
+                    },
+                    child: SingleChildScrollView(
+                      controller: _scroll,
+                      reverse: true,
+                      padding: const EdgeInsets.all(16),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight - 32,
                         ),
-                        for (final message in chat.messages)
-                          _Bubble(message: message, maxWidth: maxBubble),
-                      ],
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          spacing: 6,
+                          children: [
+                            if (app.loadingOlder)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: Center(
+                                  child: SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.muted,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            if (chat.historyLoaded && !chat.hasOlder)
+                              Center(
+                                child: Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.card,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: const Text(
+                                    'You connected · say hello',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.muted,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            for (final message in chat.messages)
+                              _Bubble(message: message, maxWidth: maxBubble),
+                          ],
+                        ),
+                      ),
                     ),
                   );
                 },

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -252,9 +253,12 @@ class Wordmark extends StatelessWidget {
 
 /// Loads a photo or clip location: a web address, or a file on this device.
 ImageProvider imageAt(String location) {
-  return location.startsWith('http')
-      ? NetworkImage(location)
-      : FileImage(File(location));
+  if (!location.startsWith('http')) return FileImage(File(location));
+  // Links to stored files carry a fresh access token every time they are
+  // issued. Caching by the address without it lets a photo downloaded once
+  // be reused.
+  final key = Uri.parse(location).replace(query: '').toString();
+  return CachedNetworkImageProvider(location, cacheKey: key);
 }
 
 /// A circular avatar: the person's photo, or their initials on the

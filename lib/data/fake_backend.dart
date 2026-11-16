@@ -237,9 +237,24 @@ class _FakeChats implements ChatRepository {
   Future<List<Chat>> loadChats() => _store.call(
     () => [
       for (final chat in _store.chats)
-        if (_store.visible(chat.personId)) chat.copy(),
+        if (_store.visible(chat.personId)) chat.preview(),
     ],
   );
+
+  @override
+  Future<MessagePage> loadMessages(
+    String chatId, {
+    DateTime? before,
+    int limit = 30,
+  }) => _store.call(() {
+    final chat = _store.chats.firstWhere((c) => c.id == chatId);
+    final earlier = [
+      for (final m in chat.messages)
+        if (before == null || m.sentAt.isBefore(before)) m,
+    ];
+    final start = earlier.length > limit ? earlier.length - limit : 0;
+    return MessagePage(messages: earlier.sublist(start), hasOlder: start > 0);
+  });
 
   @override
   Stream<ChatEvent> get events => _store.events.stream;
@@ -247,7 +262,7 @@ class _FakeChats implements ChatRepository {
   @override
   Future<void> send(String chatId, String body) => _store.call(() {
     final chat = _store.chats.firstWhere((c) => c.id == chatId);
-    chat.messages.add(Message(me: true, body: body));
+    chat.messages.add(Message(me: true, body: body, sentAt: DateTime.now()));
     chat.lastActivity = DateTime.now();
 
     // The design's simulated reply.
@@ -258,7 +273,11 @@ class _FakeChats implements ChatRepository {
     );
     _store.timers.add(
       Timer(const Duration(milliseconds: 1800), () {
-        const reply = Message(me: false, body: 'Sounds good, let’s do it.');
+        final reply = Message(
+          me: false,
+          body: 'Sounds good, let’s do it.',
+          sentAt: DateTime.now(),
+        );
         chat.messages.add(reply);
         _store.events.add(TypingChanged(chatId, typing: false));
         _store.events.add(MessageReceived(chatId, reply));

@@ -5,6 +5,7 @@ import 'package:creya/data/fake_backend.dart';
 import 'package:creya/data/media.dart';
 import 'package:creya/data/repositories.dart';
 import 'package:creya/main.dart';
+import 'package:creya/mock_data.dart';
 import 'package:creya/models.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -89,8 +90,155 @@ class _ScriptedPicker implements MediaPicker {
   Future<PickedMedia?> pickClip() => _pick();
 }
 
+/// Hands out the Discover queue two people at a time, like a paged backend.
+class _PagedDiscover implements DiscoverRepository {
+  final _swiped = <String>{};
+
+  @override
+  Future<List<Person>> loadDeck() async => [
+    for (final id in discoverQueue)
+      if (!_swiped.contains(id)) people[id]!,
+  ].take(2).toList();
+
+  @override
+  Future<void> swipe(String personId, SwipeDirection direction) async =>
+      _swiped.add(personId);
+
+  @override
+  Future<void> undoSkips() async => _swiped.clear();
+}
+
+/// One chat with a long history, served a page at a time.
+class _LongChat implements ChatRepository {
+  final history = [
+    for (var i = 1; i <= 70; i++)
+      Message(
+        id: 'msg$i',
+        me: i.isEven,
+        body: 'Message $i',
+        sentAt: DateTime(2026, 1, 1).add(Duration(minutes: i)),
+      ),
+  ];
+  var pagesServed = 0;
+
+  @override
+  Future<List<Chat>> loadChats() async => [
+    Chat(
+      id: 'h1',
+      person: people['maya']!,
+      lastActivity: history.last.sentAt,
+      unread: false,
+      messages: [history.last],
+    ),
+  ];
+
+  @override
+  Future<MessagePage> loadMessages(
+    String chatId, {
+    DateTime? before,
+    int limit = 30,
+  }) async {
+    pagesServed++;
+    final earlier = [
+      for (final m in history)
+        if (before == null || m.sentAt.isBefore(before)) m,
+    ];
+    final start = earlier.length > limit ? earlier.length - limit : 0;
+    return MessagePage(messages: earlier.sublist(start), hasOlder: start > 0);
+  }
+
+  @override
+  Stream<ChatEvent> get events => const Stream.empty();
+
+  @override
+  Future<void> send(String chatId, String body) async {}
+
+  @override
+  Future<void> markRead(String chatId) async {}
+}
+
+Backend _backendWith({DiscoverRepository? discover, ChatRepository? chats}) {
+  final base = fakeBackend();
+  return Backend(
+    auth: base.auth,
+    profiles: base.profiles,
+    discover: discover ?? base.discover,
+    collabs: base.collabs,
+    requests: base.requests,
+    chats: chats ?? base.chats,
+    safety: base.safety,
+  );
+}
+
 void main() {
   setUpAll(_loadFonts);
+
+  testWidgets('the deck tops itself up as it runs low', (tester) async {
+    final state = await _pump(
+      tester,
+      screen: 'discover',
+      backend: _backendWith(discover: _PagedDiscover()),
+    );
+    expect(state.visibleDeck.map((p) => p.id), ['amara', 'lucia']);
+
+    await tester.tap(find.bySemanticsLabel('Skip'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    expect(state.visibleDeck.map((p) => p.id), ['lucia', 'theo']);
+  });
+
+  testWidgets('a long chat loads a page at a time as you scroll back', (
+    tester,
+  ) async {
+    final chats = _LongChat();
+    final state = await _pump(
+      tester,
+      screen: 'chat',
+      backend: _backendWith(chats: chats),
+    );
+    final chat = state.activeChat!;
+    expect(chat.messages, hasLength(30));
+    expect(chat.messages.last.body, 'Message 70');
+    expect(find.text('Message 70'), findsOneWidget);
+    expect(find.text('You connected · say hello'), findsNothing);
+
+    // Scrolling back towards the start fetches earlier pages.
+    for (var i = 0; i < 12 && chat.hasOlder; i++) {
+      await tester.drag(
+        find.byType(SingleChildScrollView),
+        const Offset(0, 500),
+      );
+      await tester.pump();
+      await tester.pump();
+    }
+    expect(chat.messages, hasLength(70));
+    expect(chat.messages.first.body, 'Message 1');
+    expect(chats.pagesServed, 3);
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, 4000),
+    );
+    await tester.pump();
+    expect(find.text('You connected · say hello'), findsOneWidget);
+    expect(chats.pagesServed, 3);
+
+    // A background refresh keeps the pages already on screen.
+    await state.refresh();
+    expect(state.activeChat!.messages, hasLength(70));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a short chat stays at the top of the screen', (tester) async {
+    await _pump(tester, screen: 'chat');
+    final first = tester.getTopLeft(find.text('You connected · say hello'));
+    final last = tester.getTopLeft(
+      find.text('Want me to mock up a cover for the single?'),
+    );
+    expect(first.dy, lessThan(200));
+    expect(last.dy, greaterThan(first.dy));
+    expect(last.dy, lessThan(500));
+  });
 
   const screens = {
     'welcome': 'Continue with Google',

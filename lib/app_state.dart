@@ -116,12 +116,25 @@ class AppState extends ChangeNotifier {
   late final StreamSubscription<ChatEvent> _chatEvents;
   Timer? _toastTimer;
   int _tempIds = 0;
+
+  /// Backend calls still in flight, and whether a refresh is running.
+  int _pending = 0;
+  bool _refreshing = false;
+
+  /// People swiped this session, so a deck reload that races a swipe can't
+  /// bring them back.
+  final Set<String> _swiped = {};
+
+  /// True while an earlier page of the open chat is loading.
+  bool loadingOlder = false;
   bool _disposed = false;
 
   void _reset() {
     _clipUpload?.cancel();
     _clipUpload = null;
     _toastTimer?.cancel();
+    _swiped.clear();
+    loadingOlder = false;
 
     stage = AppStage.welcome;
     tab = AppTab.discover;
@@ -238,30 +251,70 @@ class AppState extends ChangeNotifier {
         backend.requests.loadCollabRequests(),
         backend.chats.loadChats(),
       ).wait;
-      _deck = deck;
+      _deck = deck.where((p) => !_swiped.contains(p.id)).toList();
       _browse = browse;
       _mine = mine;
       _connections = connections;
       _collabRequests = collabRequests;
-      _chats = chats;
+      _chats = [for (final chat in chats) _keepHistory(chat)];
       _loadState = ListState.data;
     } catch (_) {
       if (!quiet) _loadState = ListState.error;
     }
     notifyListeners();
+    // A chat opened before its list arrived still needs its messages.
+    final open = activeChat;
+    if (open != null && !open.historyLoaded) await _loadHistory(open);
+  }
+
+  /// A reloaded chat only carries its latest message, so messages already
+  /// on screen are carried over from the copy it replaces.
+  Chat _keepHistory(Chat fresh) {
+    final old = _chatById(fresh.id);
+    if (old == null || !old.historyLoaded) return fresh;
+    return Chat(
+      id: fresh.id,
+      person: fresh.person,
+      lastActivity: fresh.lastActivity,
+      unread: fresh.unread,
+      messages: old.messages,
+      historyLoaded: true,
+      hasOlder: old.hasOlder,
+    );
+  }
+
+  /// Brings everything up to date without disturbing the screen. Skipped
+  /// while a change is still on its way to the backend, so the reload can't
+  /// briefly undo it.
+  Future<void> refresh() async {
+    if (stage != AppStage.app || _pending > 0 || _refreshing) return;
+    if (_loadState != ListState.data) return;
+    _refreshing = true;
+    try {
+      await _load(quiet: true);
+    } finally {
+      _refreshing = false;
+    }
   }
 
   /// Runs a backend call for a change already shown on screen. On failure it
-  /// tells the user and reloads, which undoes the change. Returns whether the
-  /// call succeeded.
-  Future<bool> _sync(Future<void> Function() call) async {
+  /// tells the user and reloads, which undoes the change; [undo] reverts
+  /// anything the reload can't. Returns whether the call succeeded.
+  Future<bool> _sync(
+    Future<void> Function() call, {
+    void Function()? undo,
+  }) async {
+    _pending++;
     try {
       await call();
       return true;
     } catch (_) {
+      undo?.call();
       showToast('Something went wrong. Please try again.');
       if (stage == AppStage.app) await _load(quiet: true);
       return false;
+    } finally {
+      _pending--;
     }
   }
 
@@ -372,6 +425,7 @@ class AppState extends ChangeNotifier {
     _viewed = null;
     showDeleteSheet = false;
     notifyListeners();
+    unawaited(refresh());
   }
 
   void openPerson(Person person) {
@@ -619,18 +673,42 @@ class AppState extends ChangeNotifier {
   // ---- Discover ----------------------------------------------------------
 
   Future<void> finishSwipe(Person person, SwipeDirection direction) async {
+    _swiped.add(person.id);
     _deck = _deck.where((p) => p.id != person.id).toList();
     if (direction == SwipeDirection.right) {
       showToast('Connection request sent to ${person.firstName}');
     } else {
       notifyListeners();
     }
-    await _sync(() => backend.discover.swipe(person.id, direction));
+    final sent = await _sync(
+      () => backend.discover.swipe(person.id, direction),
+      undo: () => _swiped.remove(person.id),
+    );
+    if (!sent) return;
+    if (_deck.length < _deckTopUpAt) await _topUpDeck();
+  }
+
+  static const _deckTopUpAt = 3;
+
+  /// Fetches more people as the deck runs low. Failing is fine: the user
+  /// still has the cards in hand and "Refresh queue" when those run out.
+  Future<void> _topUpDeck() async {
+    try {
+      final more = await backend.discover.loadDeck();
+      final held = {for (final p in _deck) p.id};
+      _deck = [
+        ..._deck,
+        for (final p in more)
+          if (!held.contains(p.id) && !_swiped.contains(p.id)) p,
+      ];
+      notifyListeners();
+    } catch (_) {}
   }
 
   /// Brings skipped people back round.
   Future<void> resetDeck() => _sync(() async {
     await backend.discover.undoSkips();
+    _swiped.clear();
     _deck = await backend.discover.loadDeck();
     notifyListeners();
   });
@@ -766,7 +844,59 @@ class AppState extends ChangeNotifier {
     chatId = chat.id;
     typing = false;
     notifyListeners();
-    await _sync(() => backend.chats.markRead(chat.id));
+    await Future.wait([
+      _sync(() => backend.chats.markRead(chat.id)),
+      if (!chat.historyLoaded) _loadHistory(chat),
+    ]);
+  }
+
+  /// Loads the newest page of a chat, replacing its one-message preview.
+  Future<void> _loadHistory(Chat chat) async {
+    final preview = List.of(chat.messages);
+    try {
+      final page = await backend.chats.loadMessages(chat.id);
+      // Keep whatever arrived or was sent while the page was loading, unless
+      // the page already includes it.
+      bool inPage(Message m) => page.messages.any(
+        (saved) => m.id != null
+            ? saved.id == m.id
+            : saved.me == m.me && saved.body == m.body,
+      );
+      final since = [
+        for (final m in chat.messages)
+          if (!preview.contains(m) && !inPage(m)) m,
+      ];
+      chat.messages
+        ..clear()
+        ..addAll(page.messages)
+        ..addAll(since);
+      chat.historyLoaded = true;
+      chat.hasOlder = page.hasOlder;
+      notifyListeners();
+    } catch (_) {
+      showToast("Couldn't load this chat. Please try again.");
+    }
+  }
+
+  /// Loads the page before the earliest message on screen.
+  Future<void> loadOlderMessages() async {
+    final chat = activeChat;
+    if (chat == null || !chat.hasOlder || loadingOlder) return;
+    if (chat.messages.isEmpty) return;
+    loadingOlder = true;
+    notifyListeners();
+    try {
+      final page = await backend.chats.loadMessages(
+        chat.id,
+        before: chat.messages.first.sentAt,
+      );
+      chat.messages.insertAll(0, page.messages);
+      chat.hasOlder = page.hasOlder;
+    } catch (_) {
+      showToast("Couldn't load earlier messages.");
+    }
+    loadingOlder = false;
+    notifyListeners();
   }
 
   Future<void> sendMessage(String text) async {
@@ -774,7 +904,7 @@ class AppState extends ChangeNotifier {
     final chat = activeChat;
     if (body.isEmpty || chat == null) return;
     chat.lastActivity = DateTime.now();
-    chat.messages.add(Message(me: true, body: body));
+    chat.messages.add(Message(me: true, body: body, sentAt: DateTime.now()));
     notifyListeners();
     await _sync(() => backend.chats.send(chat.id, body));
   }
@@ -792,6 +922,12 @@ class AppState extends ChangeNotifier {
         if (!open) return;
         this.typing = typing;
       case MessageReceived(:final message):
+        if (message.id != null &&
+            chat.messages.any((m) => m.id == message.id)) {
+          return;
+        }
+        // An unopened chat only ever holds its latest message.
+        if (!chat.historyLoaded) chat.messages.clear();
         chat.messages.add(message);
         chat.lastActivity = DateTime.now();
         if (open) {

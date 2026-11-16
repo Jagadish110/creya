@@ -53,15 +53,38 @@ Future<void> main() async {
   );
 }
 
-class CreyaApp extends StatelessWidget {
+class CreyaApp extends StatefulWidget {
   const CreyaApp({super.key, required this.state});
 
   final AppState state;
 
   @override
+  State<CreyaApp> createState() => _CreyaAppState();
+}
+
+class _CreyaAppState extends State<CreyaApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Coming back to the app picks up anything that happened while away.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) widget.state.refresh();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AppScope(
-      state: state,
+      state: widget.state,
       child: MaterialApp(
         title: 'Creya',
         debugShowCheckedModeBanner: false,

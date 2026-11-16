@@ -21,6 +21,7 @@ Or paste each file in `migrations/` into the SQL editor in the Supabase dashboar
 4. `storage`: private `avatars`, `clips` and `collab-media` buckets. Each user writes only inside a folder named after their user id.
 
 5. `app_support`: a public connection count on profiles, `mark_chat_read` and `delete_my_account`.
+6. `chat_previews`: each chat keeps its latest message, so the chat list loads without any message history.
 
 After applying to a hosted project, switch on anonymous sign-ins (Authentication → Sign In / Providers) until Google sign-in is set up; the app uses them as a stand-in.
 

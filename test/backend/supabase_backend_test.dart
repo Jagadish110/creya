@@ -221,6 +221,37 @@ void main() {
       expect((await ann.backend.chats.loadChats()).single.unread, isFalse);
     });
 
+    test('chat history loads a page at a time', () async {
+      for (var i = 1; i <= 34; i++) {
+        await bob.backend.chats.send(chat.id, 'Line $i');
+      }
+      // The chat list carries only the latest message.
+      final listed = (await ann.backend.chats.loadChats()).single;
+      expect(listed.messages.single.body, 'Line 34');
+      expect(listed.unread, isTrue);
+
+      final newest = await ann.backend.chats.loadMessages(chat.id);
+      expect(newest.messages, hasLength(30));
+      expect(newest.messages.last.body, 'Line 34');
+      expect(newest.messages.first.body, 'Line 5');
+      expect(newest.hasOlder, isTrue);
+
+      final older = await ann.backend.chats.loadMessages(
+        chat.id,
+        before: newest.messages.first.sentAt,
+      );
+      expect(older.messages.map((m) => m.body), [
+        'Hello Ann',
+        for (var i = 1; i <= 4; i++) 'Line $i',
+      ]);
+      expect(older.hasOlder, isFalse);
+      expect(older.messages.every((m) => !m.me), isTrue);
+      expect(
+        (await bob.backend.chats.loadMessages(chat.id)).messages.last.me,
+        isTrue,
+      );
+    });
+
     test('collab posts can be applied to, renamed and answered', () async {
       final post = await ann.backend.collabs.createPost(
         const PostDraft(title: 'Vocalist wanted', skill: 'Vocalist'),
