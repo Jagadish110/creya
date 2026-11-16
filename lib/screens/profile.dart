@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 
 import '../app_state.dart';
 import '../icons.dart';
@@ -30,23 +33,8 @@ class ProfileScreen extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  GradientBox(gradient: person.bg),
-                  Center(
-                    child: Container(
-                      width: 56,
-                      height: 56,
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        color: Color(0x66000000),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const AppIcon(
-                        AppIcons.play,
-                        color: Colors.white,
-                        filled: true,
-                      ),
-                    ),
-                  ),
+                  // Keyed by clip, so a replaced clip starts from scratch.
+                  _ClipHeader(key: ValueKey(person.clip), person: person),
                   const Positioned(
                     left: 0,
                     right: 0,
@@ -127,18 +115,13 @@ class ProfileScreen extends StatelessWidget {
                         color: AppColors.bg,
                         shape: BoxShape.circle,
                       ),
-                      child: GradientBox(
-                        gradient: person.bg,
-                        borderRadius: BorderRadius.circular(96),
-                        child: Center(
-                          child: Text(
-                            person.initials,
-                            style: const TextStyle(
-                              fontFamily: AppFonts.heading,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 36,
-                            ),
-                          ),
+                      child: Avatar(
+                        person: person,
+                        size: 88,
+                        fontSize: 36,
+                        style: const TextStyle(
+                          fontFamily: AppFonts.heading,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -262,9 +245,7 @@ class ProfileScreen extends StatelessWidget {
                         Expanded(
                           child: PillButton(
                             label: 'Edit profile',
-                            onTap: () => app.showToast(
-                              'Edit profile opens the same fields as onboarding',
-                            ),
+                            onTap: app.editProfile,
                             height: 50,
                             fontSize: 15,
                           ),
@@ -308,6 +289,141 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The profile's header artwork. Tapping it plays the person's talent clip
+/// in place, and tapping again pauses it. The player is only created on the
+/// first tap, so opening a profile costs nothing.
+class _ClipHeader extends StatefulWidget {
+  const _ClipHeader({super.key, required this.person});
+
+  final Person person;
+
+  @override
+  State<_ClipHeader> createState() => _ClipHeaderState();
+}
+
+class _ClipHeaderState extends State<_ClipHeader> {
+  VideoPlayerController? _controller;
+  bool _loading = false;
+  bool _failed = false;
+
+  Future<void> _toggle() async {
+    final clip = widget.person.clip;
+    if (clip == null || _loading) return;
+
+    final existing = _controller;
+    if (existing != null) {
+      existing.value.isPlaying ? await existing.pause() : await existing.play();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    final controller = clip.startsWith('http')
+        ? VideoPlayerController.networkUrl(Uri.parse(clip))
+        : VideoPlayerController.file(File(clip));
+    try {
+      await controller.initialize();
+      await controller.setLooping(true);
+      await controller.play();
+    } catch (_) {
+      await controller.dispose();
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _failed = true;
+        });
+      }
+      return;
+    }
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    setState(() {
+      _controller = controller;
+      _loading = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    final playing = controller?.value.isPlaying ?? false;
+    final hasClip = widget.person.clip != null;
+
+    return Semantics(
+      button: hasClip,
+      label: !hasClip
+          ? null
+          : playing
+          ? 'Pause talent clip'
+          : 'Play talent clip',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: hasClip ? _toggle : null,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            GradientBox(gradient: widget.person.bg),
+            if (controller != null)
+              FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(
+                  width: controller.value.size.width,
+                  height: controller.value.size.height,
+                  child: VideoPlayer(controller),
+                ),
+              ),
+            if (!playing)
+              Center(
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  alignment: Alignment.center,
+                  decoration: const BoxDecoration(
+                    color: Color(0x66000000),
+                    shape: BoxShape.circle,
+                  ),
+                  child: _loading
+                      ? const SizedBox.square(
+                          dimension: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const AppIcon(
+                          AppIcons.play,
+                          color: Colors.white,
+                          filled: true,
+                        ),
+                ),
+              ),
+            if (_failed)
+              const Align(
+                alignment: Alignment(0, 0.45),
+                child: Text(
+                  "Couldn't play this clip",
+                  style: TextStyle(fontSize: 13, color: Colors.white),
+                ),
+              ),
           ],
         ),
       ),

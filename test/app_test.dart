@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:creya/app_state.dart';
 import 'package:creya/data/fake_backend.dart';
+import 'package:creya/data/media.dart';
 import 'package:creya/data/repositories.dart';
 import 'package:creya/main.dart';
 import 'package:creya/models.dart';
@@ -17,12 +18,14 @@ Future<AppState> _pump(
   String? screen,
   ListState listState = ListState.data,
   Backend? backend,
+  MediaPicker? picker,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final state = AppState(
     backend: backend,
+    picker: picker,
     screenKey: screen,
     listState: listState,
   );
@@ -66,6 +69,24 @@ class _OfflineDiscover implements DiscoverRepository {
 
   @override
   Future<void> undoSkips() => _inner.undoSkips();
+}
+
+/// A photo library whose next pick is decided by the test.
+class _ScriptedPicker implements MediaPicker {
+  PickedMedia? next;
+  MediaRejected? rejection;
+
+  Future<PickedMedia?> _pick() async {
+    final rejected = rejection;
+    if (rejected != null) throw rejected;
+    return next;
+  }
+
+  @override
+  Future<PickedMedia?> pickPhoto() => _pick();
+
+  @override
+  Future<PickedMedia?> pickClip() => _pick();
 }
 
 void main() {
@@ -342,5 +363,98 @@ void main() {
       findsOneWidget,
     );
     await tester.pump(_settle);
+  });
+
+  testWidgets('backing out of the photo library changes nothing', (
+    tester,
+  ) async {
+    final state = await _pump(
+      tester,
+      screen: 'craft',
+      picker: _ScriptedPicker(),
+    );
+    state.goToStage(AppStage.face);
+    await tester.pump();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('Choose profile photo')));
+    await tester.tap(find.bySemanticsLabel(RegExp('Upload talent clip')));
+    await tester.pump();
+    expect(state.hasPhoto, isFalse);
+    expect(state.clip, ClipStatus.idle);
+    expect(state.toastMessage, isNull);
+  });
+
+  testWidgets('a clip over the limit is refused with the reason', (
+    tester,
+  ) async {
+    final picker = _ScriptedPicker()
+      ..rejection = const MediaRejected('That clip is 0:45 long.');
+    final state = await _pump(tester, screen: 'craft', picker: picker);
+    state.goToStage(AppStage.face);
+    await tester.pump();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('Upload talent clip')));
+    await tester.pump();
+    expect(state.clip, ClipStatus.idle);
+    expect(find.text('That clip is 0:45 long.'), findsOneWidget);
+    await tester.pump(_settle);
+  });
+
+  testWidgets('the chosen clip shows its own name and length', (tester) async {
+    final picker = _ScriptedPicker()
+      ..next = const PickedMedia(
+        name: 'live-set.mp4',
+        length: Duration(seconds: 14),
+      );
+    final state = await _pump(tester, screen: 'craft', picker: picker);
+    state.goToStage(AppStage.face);
+    await tester.pump();
+
+    await tester.tap(find.bySemanticsLabel(RegExp('Upload talent clip')));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('live-set.mp4 · 0:14'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('Clip ready · 0:14'), findsOneWidget);
+  });
+
+  testWidgets('editing the profile saves changes', (tester) async {
+    final state = await _pump(tester, screen: 'profile');
+    state.addPhoto();
+    state.uploadClip();
+    await tester.pump(const Duration(seconds: 2));
+
+    await tester.ensureVisible(find.text('Edit profile'));
+    await tester.tap(find.text('Edit profile'));
+    await tester.pump();
+    expect(find.text('Full name'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).first, 'Jordan Vale');
+    await tester.tap(find.text('Continue'));
+    await tester.pump();
+    await tester.tap(find.text('Save changes'));
+    await tester.pump();
+    expect(state.stage, AppStage.app);
+    expect(state.tab, AppTab.profile);
+    expect(find.text('Profile updated'), findsOneWidget);
+    expect(find.text('Jordan Vale'), findsOneWidget);
+    await tester.pump(_settle);
+  });
+
+  testWidgets('backing out of an edit drops the changes', (tester) async {
+    final state = await _pump(tester, screen: 'profile');
+
+    await tester.ensureVisible(find.text('Edit profile'));
+    await tester.tap(find.text('Edit profile'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).first, 'Someone Else');
+    state.addGenre('Techno');
+    await tester.pump();
+
+    expect(state.handleBack(), isTrue);
+    await tester.pump();
+    expect(state.stage, AppStage.app);
+    expect(state.name, 'Jordan Reyes');
+    expect(state.genres, isNot(contains('Techno')));
+    expect(find.text('Jordan Reyes'), findsOneWidget);
   });
 }

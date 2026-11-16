@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import 'data/fake_backend.dart';
+import 'data/media.dart';
 import 'data/repositories.dart';
 import 'models.dart';
 
@@ -26,9 +27,14 @@ enum RequestMode { connections, collabs }
 /// Actions update the screen straight away and then tell the backend. If the
 /// backend refuses, the user sees a message and the data is reloaded.
 class AppState extends ChangeNotifier {
-  AppState({Backend? backend, ListState? listState, String? screenKey})
-    : backend = backend ?? fakeBackend(),
-      _forcedListState = listState == ListState.data ? null : listState {
+  AppState({
+    Backend? backend,
+    MediaPicker? picker,
+    ListState? listState,
+    String? screenKey,
+  }) : backend = backend ?? fakeBackend(),
+       picker = picker ?? const SampleMediaPicker(),
+       _forcedListState = listState == ListState.data ? null : listState {
     _reset();
     _chatEvents = this.backend.chats.events.listen(_onChatEvent);
     if (screenKey != null) _applyScreenKey(screenKey);
@@ -36,6 +42,7 @@ class AppState extends ChangeNotifier {
   }
 
   final Backend backend;
+  final MediaPicker picker;
 
   /// A development override that pins list screens to one variant.
   ListState? _forcedListState;
@@ -60,8 +67,16 @@ class AppState extends ChangeNotifier {
   late List<String> genres;
   late String bio;
   late bool hasPhoto;
+  String? photoPath;
   late ClipStatus clip;
   late int uploadPct;
+
+  /// The clip being uploaded or already attached.
+  PickedMedia? clipMedia;
+
+  /// True while the onboarding screens are being reused to edit the profile.
+  late bool editingProfile;
+  _ProfileSnapshot? _beforeEdit;
 
   late List<Person> _deck;
 
@@ -108,8 +123,12 @@ class AppState extends ChangeNotifier {
     bio =
         'Producer and mix engineer. I make records that feel like summer evenings.';
     hasPhoto = false;
+    photoPath = null;
     clip = ClipStatus.idle;
     uploadPct = 0;
+    clipMedia = null;
+    editingProfile = false;
+    _beforeEdit = null;
     _deck = [];
     collabMode = CollabMode.browse;
     requestMode = RequestMode.connections;
@@ -248,7 +267,15 @@ class AppState extends ChangeNotifier {
     bio: bio,
     hue: 275,
     connections: 24,
+    photo: photoPath,
+    clip: clipMedia?.path,
   );
+
+  /// The attached clip's length as `m:ss`.
+  String get clipLengthLabel =>
+      formatClipLength(clipMedia?.length ?? MediaLimits.clipLength);
+
+  String get clipName => clipMedia?.name ?? 'Your clip';
 
   /// The person whose profile is open, if any.
   Person? get viewed => _viewed;
@@ -356,7 +383,7 @@ class AppState extends ChangeNotifier {
       return true;
     }
     if (stage == AppStage.craft) {
-      goToStage(AppStage.welcome);
+      leaveCraft();
       return true;
     }
     if (stage == AppStage.app && sub != SubScreen.none) {
@@ -415,49 +442,110 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Asks the picker for a file, reporting a rejected one to the user.
+  Future<PickedMedia?> _pick(Future<PickedMedia?> Function() pick) async {
+    try {
+      return await pick();
+    } on MediaRejected catch (rejected) {
+      showToast(rejected.message);
+    } catch (_) {
+      showToast("Couldn't open your photo library.");
+    }
+    return null;
+  }
+
   Future<void> addPhoto() async {
+    final photo = await _pick(picker.pickPhoto);
+    if (photo == null) return;
+    final hadPhoto = hasPhoto;
+    final previousPath = photoPath;
     hasPhoto = true;
+    photoPath = photo.path;
     notifyListeners();
-    if (!await _sync(backend.profiles.uploadPhoto)) {
-      hasPhoto = false;
+    if (!await _sync(() => backend.profiles.uploadPhoto(photo))) {
+      hasPhoto = hadPhoto;
+      photoPath = previousPath;
       notifyListeners();
     }
   }
 
-  void uploadClip() {
+  Future<void> uploadClip() async {
     if (clip == ClipStatus.uploading) return;
+    final picked = await _pick(picker.pickClip);
+    if (picked == null || clip == ClipStatus.uploading) return;
+    final previous = clipMedia;
+    clipMedia = picked;
     clip = ClipStatus.uploading;
     uploadPct = 0;
     notifyListeners();
-    _clipUpload = backend.profiles.uploadClip().listen(
-      (pct) {
-        uploadPct = pct.clamp(0, 100);
-        notifyListeners();
-      },
-      onDone: () {
-        clip = ClipStatus.done;
-        uploadPct = 100;
-        notifyListeners();
-      },
-      onError: (Object _) {
-        clip = ClipStatus.idle;
-        uploadPct = 0;
-        showToast('Upload failed. Please try again.');
-      },
-      cancelOnError: true,
-    );
+    _clipUpload = backend.profiles
+        .uploadClip(picked)
+        .listen(
+          (pct) {
+            uploadPct = pct.clamp(0, 100);
+            notifyListeners();
+          },
+          onDone: () {
+            clip = ClipStatus.done;
+            uploadPct = 100;
+            notifyListeners();
+          },
+          onError: (Object _) {
+            // Fall back to the clip that was attached before, if there was one.
+            clipMedia = previous;
+            clip = previous != null ? ClipStatus.done : ClipStatus.idle;
+            uploadPct = 0;
+            showToast('Upload failed. Please try again.');
+          },
+          cancelOnError: true,
+        );
   }
 
+  /// Finishes the last onboarding step: creates the account, or saves the
+  /// changes when editing an existing profile.
   Future<void> finishOnboarding() async {
     if (!canCreateAccount) {
-      showToast('Add a profile photo and a talent clip to continue');
+      showToast(
+        clip == ClipStatus.uploading
+            ? 'Your clip is still uploading'
+            : 'Add a profile photo and a talent clip to continue',
+      );
       return;
     }
     if (!await _sync(() => backend.profiles.saveProfile(me))) return;
     stage = AppStage.app;
+    if (editingProfile) {
+      editingProfile = false;
+      _beforeEdit = null;
+      showToast('Profile updated');
+      return;
+    }
     selectTab(AppTab.discover);
     showToast('Welcome to Creya, ${me.firstName}');
     await _load();
+  }
+
+  // ---- Editing the profile -----------------------------------------------
+
+  /// Reopens the onboarding fields on the user's current profile.
+  void editProfile() {
+    _beforeEdit = _ProfileSnapshot(this);
+    editingProfile = true;
+    stage = AppStage.craft;
+    notifyListeners();
+  }
+
+  /// Leaves the first form step: back to Welcome during sign-up, or back to
+  /// the profile with every change dropped when editing.
+  void leaveCraft() {
+    if (!editingProfile) return goToStage(AppStage.welcome);
+    _clipUpload?.cancel();
+    _clipUpload = null;
+    _beforeEdit?.restore(this);
+    _beforeEdit = null;
+    editingProfile = false;
+    stage = AppStage.app;
+    notifyListeners();
   }
 
   // ---- Discover ----------------------------------------------------------
@@ -713,6 +801,44 @@ class AppState extends ChangeNotifier {
     _chatEvents.cancel();
     _toastTimer?.cancel();
     super.dispose();
+  }
+}
+
+/// The profile as it was before an edit began, to put back on cancel.
+class _ProfileSnapshot {
+  _ProfileSnapshot(AppState app)
+    : name = app.name,
+      city = app.city,
+      creative = app.creative,
+      genres = app.genres,
+      bio = app.bio,
+      hasPhoto = app.hasPhoto,
+      photoPath = app.photoPath,
+      clip = app.clip,
+      clipMedia = app.clipMedia;
+
+  final String name;
+  final String city;
+  final String creative;
+  final List<String> genres;
+  final String bio;
+  final bool hasPhoto;
+  final String? photoPath;
+  final ClipStatus clip;
+  final PickedMedia? clipMedia;
+
+  void restore(AppState app) {
+    app.name = name;
+    app.city = city;
+    app.creative = creative;
+    app.genres = genres;
+    app.bio = bio;
+    app.hasPhoto = hasPhoto;
+    app.photoPath = photoPath;
+    // An upload still running when the edit began can't be resumed.
+    app.clip = clip == ClipStatus.uploading ? ClipStatus.idle : clip;
+    app.clipMedia = clipMedia;
+    app.uploadPct = 0;
   }
 }
 

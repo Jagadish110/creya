@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_state.dart';
+import '../data/media.dart';
 import '../icons.dart';
 import '../mock_data.dart';
 import '../theme.dart';
@@ -309,7 +310,7 @@ class _CraftScreenState extends State<CraftScreen> {
     final app = AppScope.of(context);
     return _FormStep(
       step: 2,
-      onBack: () => app.goToStage(AppStage.welcome),
+      onBack: app.leaveCraft,
       title: 'Your ',
       em: 'craft.',
       subtitle: 'Tell other creatives about you.',
@@ -475,7 +476,7 @@ class FaceScreen extends StatelessWidget {
       em: 'face.',
       subtitle: 'A photo and a clip. Show your talent first.',
       footer: PillButton(
-        label: 'Create account',
+        label: app.editingProfile ? 'Save changes' : 'Create account',
         opacity: app.canCreateAccount ? 1 : 0.4,
         onTap: app.finishOnboarding,
       ),
@@ -487,22 +488,14 @@ class FaceScreen extends StatelessWidget {
               label: 'Choose profile photo',
               builder: (context, _) {
                 if (app.hasPhoto) {
-                  return SizedBox.square(
-                    dimension: 96,
-                    child: GradientBox(
-                      gradient: me.bg,
-                      borderRadius: BorderRadius.circular(96),
-                      child: Center(
-                        child: Text(
-                          me.initials,
-                          style: const TextStyle(
-                            fontFamily: AppFonts.heading,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 36,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
+                  return Avatar(
+                    person: me,
+                    size: 96,
+                    fontSize: 36,
+                    style: const TextStyle(
+                      fontFamily: AppFonts.heading,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
                     ),
                   );
                 }
@@ -565,15 +558,15 @@ class FaceScreen extends StatelessWidget {
           ],
         ),
         FieldLabel(
-          label: const Text.rich(
+          label: Text.rich(
             TextSpan(
               text: 'Talent clip · ',
               children: [
-                TextSpan(
+                const TextSpan(
                   text: 'required',
                   style: TextStyle(color: AppColors.accent),
                 ),
-                TextSpan(text: ' · 20s max'),
+                TextSpan(text: ' · ${MediaLimits.clipLength.inSeconds}s max'),
               ],
             ),
           ),
@@ -623,22 +616,22 @@ class _ClipContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final children = switch (app.clip) {
-      ClipStatus.idle => const <Widget>[
-        AppIcon(
+      ClipStatus.idle => <Widget>[
+        const AppIcon(
           AppIcons.upload,
           color: AppColors.accent,
           size: 26,
           strokeWidth: 2,
         ),
-        Text('Tap to upload your clip', style: _title),
+        const Text('Tap to upload your clip', style: _title),
         Text(
-          'MP4, MOV · longer clips auto-trimmed to 20s',
+          'MP4 or MOV · up to ${MediaLimits.clipLength.inSeconds} seconds',
           style: _caption,
           textAlign: TextAlign.center,
         ),
       ],
       ClipStatus.uploading => <Widget>[
-        Text('Compressing & uploading… ${app.uploadPct}%', style: _title),
+        Text('Uploading… ${app.uploadPct}%', style: _title),
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: LinearProgressIndicator(
@@ -648,7 +641,12 @@ class _ClipContent extends StatelessWidget {
             color: AppColors.accent,
           ),
         ),
-        const Text('studio-session.mov · trimmed to 0:20', style: _caption),
+        Text(
+          '${app.clipName} · ${app.clipLengthLabel}',
+          style: _caption,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
       ClipStatus.done => <Widget>[
         Container(
@@ -666,7 +664,7 @@ class _ClipContent extends StatelessWidget {
             strokeWidth: 2.5,
           ),
         ),
-        const Text('Clip ready · 0:20', style: _title),
+        Text('Clip ready · ${app.clipLengthLabel}', style: _title),
         const Text('Tap to replace', style: _caption),
       ],
     };

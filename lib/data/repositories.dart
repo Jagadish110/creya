@@ -1,4 +1,5 @@
 import '../models.dart';
+import 'media.dart';
 
 /// The app's data layer. `AppState` talks only to these interfaces, so the
 /// in-memory backend used today can be swapped for a real one without
@@ -16,11 +17,13 @@ abstract interface class AuthRepository {
 }
 
 abstract interface class ProfileRepository {
-  Future<void> uploadPhoto();
+  /// Uploads only store the file. The profile starts using it when
+  /// [saveProfile] is next called, so an abandoned edit changes nothing.
+  Future<void> uploadPhoto(PickedMedia photo);
 
   /// Uploads the talent clip, reporting progress from 0 to 100. The stream
   /// closes when the upload finishes.
-  Stream<int> uploadClip();
+  Stream<int> uploadClip(PickedMedia clip);
 
   Future<void> saveProfile(Person profile);
 }

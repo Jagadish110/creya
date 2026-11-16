@@ -8,7 +8,7 @@ Welcome, Your craft, Your face (onboarding) · Discover (swipe deck) · Collabs 
 
 ## Status
 
-The app runs on an in-memory backend (`lib/data/fake_backend.dart`) seeded with sample data: Google sign-in, photo and clip uploads, and chat replies are simulated, and nothing is saved between launches. The screens only talk to the repository interfaces in `lib/data/repositories.dart`, so a real backend can replace the fake one without changing them. The database schema for that backend is in `supabase/`.
+The app runs on an in-memory backend (`lib/data/fake_backend.dart`) seeded with sample data: Google sign-in, uploads and chat replies are simulated, and nothing is saved between launches. Choosing a profile photo and talent clip uses the device's real photo library; the files stay on the device until a real backend exists. The screens only talk to the repository interfaces in `lib/data/repositories.dart`, so a real backend can replace the fake one without changing them. The database schema for that backend is in `supabase/`.
 
 ## Run it
 
@@ -41,6 +41,7 @@ flutter test
 - `lib/app_state.dart`: navigation, drafts and what each screen shows
 - `lib/data/repositories.dart`: the data layer's interfaces, one per area
 - `lib/data/fake_backend.dart`: the in-memory implementation used today
+- `lib/data/media.dart`: choosing a photo or clip from the device, and the upload limits
 - `lib/models.dart`, `lib/mock_data.dart`: data types and sample content
 - `supabase/`: database schema for the real backend (not yet connected)
 - `lib/widgets.dart`, `lib/icons.dart`: shared UI pieces and icons

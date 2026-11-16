@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../mock_data.dart';
 import '../models.dart';
+import 'media.dart';
 import 'repositories.dart';
 
 /// An in-memory backend seeded with the design's sample content. Sign-in,
@@ -87,10 +88,10 @@ class _FakeProfiles implements ProfileRepository {
   final _Store _store;
 
   @override
-  Future<void> uploadPhoto() => _store.call(() {});
+  Future<void> uploadPhoto(PickedMedia photo) => _store.call(() {});
 
   @override
-  Stream<int> uploadClip() async* {
+  Stream<int> uploadClip(PickedMedia clip) async* {
     if (_store.failing) throw StateError('Simulated backend failure');
     const step = Duration(milliseconds: 110);
     for (var pct = 7; pct < 100; pct += 7) {

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'app_shell.dart';
 import 'app_state.dart';
 import 'data/fake_backend.dart';
+import 'data/media.dart';
 import 'theme.dart';
 
 /// Development switches, set with `--dart-define`:
@@ -30,6 +31,7 @@ void main() {
     CreyaApp(
       state: AppState(
         backend: fakeBackend(),
+        picker: DeviceMediaPicker(),
         listState: ListState.values.byName(_listState),
         screenKey: _screenKey.isEmpty ? null : _screenKey,
       ),

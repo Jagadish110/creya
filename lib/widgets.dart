@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -249,32 +250,56 @@ class Wordmark extends StatelessWidget {
   Widget build(BuildContext context) => Heading('Cre', em: 'ya', size: size);
 }
 
-/// A circular gradient avatar showing initials.
+/// Loads a photo or clip location: a web address, or a file on this device.
+ImageProvider imageAt(String location) {
+  return location.startsWith('http')
+      ? NetworkImage(location)
+      : FileImage(File(location));
+}
+
+/// A circular avatar: the person's photo, or their initials on the
+/// placeholder gradient when they have none or it fails to load.
 class Avatar extends StatelessWidget {
   const Avatar({
     super.key,
     required this.person,
     required this.size,
     required this.fontSize,
+    this.style = const TextStyle(fontWeight: FontWeight.w700),
   });
 
   final Person person;
   final double size;
   final double fontSize;
+  final TextStyle style;
 
   @override
   Widget build(BuildContext context) {
+    final photo = person.photo;
     return SizedBox(
       width: size,
       height: size,
       child: GradientBox(
         gradient: person.bg,
         borderRadius: BorderRadius.circular(size),
-        child: Center(
-          child: Text(
-            person.initials,
-            style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w700),
-          ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: Text(
+                person.initials,
+                style: style.copyWith(fontSize: fontSize),
+              ),
+            ),
+            if (photo != null)
+              Image(
+                image: imageAt(photo),
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                excludeFromSemantics: true,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+          ],
         ),
       ),
     );

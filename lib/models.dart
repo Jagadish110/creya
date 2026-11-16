@@ -10,6 +10,8 @@ class Person {
     required this.bio,
     required this.hue,
     required this.connections,
+    this.photo,
+    this.clip,
   });
 
   final String id;
@@ -20,6 +22,11 @@ class Person {
   final String bio;
   final int hue;
   final int connections;
+
+  /// Where the profile photo and talent clip are: a file on this device or a
+  /// web address. Null shows the placeholder artwork instead.
+  final String? photo;
+  final String? clip;
 
   CssGradient get bg => CssGradient.fromHue(hue);
 
