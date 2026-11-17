@@ -10,10 +10,8 @@ Welcome, Your craft, Your face (onboarding) · Discover (swipe deck) · Collabs 
 
 The app has two backends behind the same interfaces (`lib/data/repositories.dart`):
 
-- **Sample backend** (default): in-memory sample data. Sign-in, uploads and chat replies are simulated and nothing is saved between launches.
-- **Supabase backend**: real accounts, profiles, uploads, discover, connections, collabs, chat with live messages, blocking, reports and account deletion. The schema is in `supabase/`.
-
-Google sign-in is not set up yet. On the Supabase backend, "Continue with Google" creates an anonymous account instead, so everything else can be used for real. Choosing a profile photo and talent clip uses the device's photo library on both backends.
+- **Supabase backend** (default): real accounts with Google sign-in, profiles, uploads, discover, connections, collabs, chat with live messages, blocking, reports and account deletion. The schema is in `supabase/`. It is set up to use the Creya project named in `lib/main.dart`.
+- **Sample backend**: in-memory sample data, with simulated sign-in, uploads and chat replies. Used by the tests and by single-screen previews (`--dart-define=SCREEN=...`), or on request with `--dart-define=SUPABASE_URL=none`.
 
 ## Run it
 
@@ -22,11 +20,19 @@ flutter pub get
 flutter run
 ```
 
-To run against a Supabase project, pass its API URL and publishable key. The project needs the migrations in `supabase/` applied and anonymous sign-ins switched on (Authentication → Sign In / Providers):
+To use a different Supabase project, pass its API URL and key:
 
 ```bash
-flutter run --dart-define=SUPABASE_URL=https://<ref>.supabase.co --dart-define=SUPABASE_KEY=<publishable key>
+flutter run --dart-define=SUPABASE_URL=https://<ref>.supabase.co --dart-define=SUPABASE_KEY=<anon or publishable key>
 ```
+
+### Google sign-in setup
+
+Google sign-in opens the browser and returns to the app through the link `com.joincreya.creya://login-callback`. In the Supabase dashboard:
+
+1. Authentication → Sign In / Providers → **Google**: switch it on and enter the **Web application** OAuth client's ID and secret from Google Cloud.
+2. Authentication → URL Configuration → **Redirect URLs**: add `com.joincreya.creya://login-callback`.
+3. In Google Cloud, the Web client's **Authorized redirect URIs** must include `https://<ref>.supabase.co/auth/v1/callback`.
 
 To open on a single screen, or to see the loading, empty and error states:
 

@@ -11,19 +11,31 @@ import 'data/supabase_backend.dart';
 import 'theme.dart';
 
 /// Switches, set with `--dart-define`:
-/// - `SUPABASE_URL` and `SUPABASE_KEY`: run against that Supabase project
-///   (its API URL and publishable key). Without them the app runs on the
-///   in-memory sample backend.
+/// - `SUPABASE_URL` and `SUPABASE_KEY`: use a different Supabase project
+///   (its API URL and publishable or anon key) than the one below. Set
+///   `SUPABASE_URL=none` to run on the in-memory sample backend instead.
 /// - `SCREEN`: open on one screen (welcome, craft, face, discover, collabs,
 ///   post, requests, messages, chat, profile, settings).
 /// - `LIST_STATE`: show list screens as data, loading, empty or error.
-const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-const _supabaseKey = String.fromEnvironment('SUPABASE_KEY');
+// The Creya project. The key is the project's public `anon` key, which is
+// designed to ship inside an app; what it can reach is limited by the
+// database's row-level security rules, not by keeping it secret.
+const _supabaseUrl = String.fromEnvironment(
+  'SUPABASE_URL',
+  defaultValue: 'https://avwkcqssjzefsrlfcant.supabase.co',
+);
+const _supabaseKey = String.fromEnvironment(
+  'SUPABASE_KEY',
+  defaultValue:
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF2d2tjcXNzanplZnNybGZjYW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ4OTIwOTAsImV4cCI6MjExMDQ2ODA5MH0.sFAXkMoPQAjCYzEcSYYIXAFpprXO2QXz29oZQw7beEw',
+);
 const _screenKey = String.fromEnvironment('SCREEN');
 const _listState = String.fromEnvironment('LIST_STATE', defaultValue: 'data');
 
 Future<Backend> _backend() async {
-  if (_supabaseUrl.isEmpty || _supabaseKey.isEmpty) return fakeBackend();
+  // Single-screen previews have no account to sign in with, so they use the
+  // sample data.
+  if (_supabaseUrl == 'none' || _screenKey.isNotEmpty) return fakeBackend();
   await Supabase.initialize(url: _supabaseUrl, publishableKey: _supabaseKey);
   return supabaseBackend(Supabase.instance.client);
 }

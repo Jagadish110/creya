@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:supabase/supabase.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models.dart';
 import 'media.dart';
@@ -10,10 +10,14 @@ import 'repositories.dart';
 /// The real backend: every repository backed by one Supabase project, using
 /// the schema in `supabase/migrations/`. The database's row-level rules
 /// decide what each call may see or change; nothing here is trusted.
-Backend supabaseBackend(SupabaseClient client) {
+///
+/// With [anonymousSignIn], "sign in" creates a throwaway anonymous account
+/// instead of opening Google. The backend tests use it, since they have no
+/// browser to sign in with.
+Backend supabaseBackend(SupabaseClient client, {bool anonymousSignIn = false}) {
   final core = _Core(client);
   return Backend(
-    auth: _SupabaseAuth(core),
+    auth: _SupabaseAuth(core, anonymous: anonymousSignIn),
     profiles: _SupabaseProfiles(core),
     discover: _SupabaseDiscover(core),
     collabs: _SupabaseCollabs(core),
@@ -101,17 +105,38 @@ class _Core {
 DateTime _time(Object? value) => DateTime.parse(value as String).toLocal();
 
 class _SupabaseAuth implements AuthRepository {
-  _SupabaseAuth(this._core);
+  _SupabaseAuth(this._core, {required this.anonymous});
 
   final _Core _core;
+  final bool anonymous;
 
-  /// Stands in for Google sign-in until it is configured: creates an
-  /// anonymous account so the rest of the app can be used for real. Needs
-  /// "anonymous sign-ins" switched on in the project's auth settings.
+  /// Where Google sends the user back to the app. It must be listed under
+  /// Authentication → URL Configuration → Redirect URLs in the project, and
+  /// matches the link registered in the Android manifest and iOS Info.plist.
+  static const redirectUrl = 'com.joincreya.creya://login-callback';
+
+  /// Opens Google's sign-in in the browser. The browser hands the result
+  /// back through [redirectUrl], so this waits for the session to appear.
   @override
   Future<void> signInWithGoogle() async {
-    if (_core.client.auth.currentUser != null) return;
-    await _core.client.auth.signInAnonymously();
+    final auth = _core.client.auth;
+    if (auth.currentSession != null) return;
+    if (anonymous) {
+      await auth.signInAnonymously();
+      return;
+    }
+
+    final signedIn = auth.onAuthStateChange.firstWhere(
+      (state) => state.session != null,
+    );
+    final opened = await auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: redirectUrl,
+    );
+    if (!opened) throw StateError("Couldn't open Google sign-in");
+    // Closing the browser without finishing is not reported, so give up
+    // after a while rather than waiting for ever.
+    await signedIn.timeout(const Duration(minutes: 3));
   }
 
   @override
@@ -484,6 +509,15 @@ class _SupabaseChats implements ChatRepository {
           callback: (change) {
             final row = change.newRecord;
             if (row['sender_id'] == _core.client.auth.currentUser?.id) return;
+            // An update with its fields missing can't be shown. The chat
+            // list is reloaded whenever the app comes back to the screen,
+            // so skipping it only delays the message, never loses it.
+            if (row['id'] is! String ||
+                row['chat_id'] is! String ||
+                row['body'] is! String ||
+                row['created_at'] is! String) {
+              return;
+            }
             _events.add(
               MessageReceived(row['chat_id'] as String, _message(row, null)),
             );

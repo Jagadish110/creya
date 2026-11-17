@@ -27,7 +27,8 @@ late Directory _temp;
 
 /// A signed-in, onboarded user with their own client and repositories.
 class _User {
-  _User(this.name, this.client) : backend = supabaseBackend(client);
+  _User(this.name, this.client)
+    : backend = supabaseBackend(client, anonymousSignIn: true);
 
   final String name;
   final SupabaseClient client;

@@ -23,10 +23,10 @@ Or paste each file in `migrations/` into the SQL editor in the Supabase dashboar
 5. `app_support`: a public connection count on profiles, `mark_chat_read` and `delete_my_account`.
 6. `chat_previews`: each chat keeps its latest message, so the chat list loads without any message history.
 
-After applying to a hosted project, switch on anonymous sign-ins (Authentication → Sign In / Providers) until Google sign-in is set up; the app uses them as a stand-in.
+After applying to a hosted project, set up Google sign-in as described in the main README. Anonymous sign-ins are only needed by the backend tests, on a local stack.
 
 ## Not covered yet
 
-- Google sign-in.
+- Apple sign-in, which the App Store requires once Google sign-in is offered.
 - Clip length can't be checked by the database; only file size and type are limited. The app checks length before uploading.
 - Typing indicators and push notifications.

@@ -4,6 +4,17 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.joincreya.creya</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.joincreya.creya</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Creya uses your photo library so you can choose a profile photo and a talent clip.</string>
 	<key>CFBundleDevelopmentRegion</key>
